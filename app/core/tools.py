@@ -75,6 +75,47 @@ def get_summary(conn: sqlite3.Connection, user_id: str, start: date | None, end:
     }
 
 
+# ------------------------------------------------------------------ daily income target
+def set_target(conn: sqlite3.Connection, user_id: str, amount: float, effective_from: date) -> None:
+    """Record a new daily income target. Older rows are kept so past days are judged by the target then."""
+    conn.execute("INSERT INTO targets (user_id, amount, effective_from) VALUES (?,?,?)",
+                 (user_id, round(float(amount), 2), effective_from.isoformat()))
+    conn.commit()
+
+
+def get_target(conn: sqlite3.Connection, user_id: str, on: date) -> float | None:
+    """The target in force on a day (latest one whose effective_from is on or before it)."""
+    row = conn.execute(
+        "SELECT amount FROM targets WHERE user_id = ? AND effective_from <= ? ORDER BY effective_from DESC, id DESC LIMIT 1",
+        (user_id, on.isoformat())).fetchone()
+    return row["amount"] if row else None
+
+
+def target_progress(conn: sqlite3.Connection, user_id: str, day: date) -> dict | None:
+    """Income vs target for one day, or None when no target was in force that day."""
+    target = get_target(conn, user_id, day)
+    if target is None:
+        return None
+    income = get_summary(conn, user_id, day, day)["income"]
+    return {"day": day.isoformat(), "target": target, "income": income, "remaining": round(max(0.0, target - income), 2),
+            "met": income >= target}
+
+
+def target_streak(conn: sqlite3.Connection, user_id: str, today: date, max_days: int = 60) -> int:
+    """Consecutive days on which the target was met, counting back from today (or yesterday if today isn't met yet)."""
+    from datetime import timedelta
+    p = target_progress(conn, user_id, today)
+    day = today if (p and p["met"]) else today - timedelta(days=1)
+    streak = 0
+    for _ in range(max_days):
+        p = target_progress(conn, user_id, day)
+        if not (p and p["met"]):
+            break
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
+
+
 # ------------------------------------------------------------------ pending (unconfirmed) actions
 PENDING_MINUTES = 30
 

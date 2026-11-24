@@ -4,7 +4,16 @@ Voice-first earnings and expense assistant for Indian gig workers.
 Internally everything is English. The user speaks and is answered in the same language, auto-detected per message.
 The WhatsApp channel comes after the backend is solid.
 
-## Status: Step 6 (voice replies) done
+## Status: Phase 0 (foundation) and daily income target done
+**Action registry** (`app/core/registry.py`, `actions.py`): every capability is declared once (name, description, JSON input schema, read-only or write, handlers). `engine.py` is now only a router that calls `REGISTRY.execute(...)`. The same declarations are the LLM tool list (`REGISTRY.tool_definitions()`) and could back an MCP server later; a new feature is one `register(...)` call. Rules: arguments are schema-validated; `user_id` is never an argument (it comes from the Context); write actions only *propose* (pending + read-back) and apply on `commit` after the user says yes; every message records its intent and actions in `messages.intent / actions_json`.
+**Versioned migrations** (`db.MIGRATIONS`, `PRAGMA user_version`): add a numbered function to extend the schema; old databases upgrade in place. `db.recent_turns()` gives the last exchanges as context for the coming LLM layer.
+**Daily income target** (per user, confirmed before it changes, history kept so past days are judged by the target then):
+- "set my daily target to 1500", "my target is 1500", "I want to earn 1800 a day" -> "Set your daily income target to ₹1,500? Say yes to confirm." Range ₹100 to ₹50,000. "make it 2000" corrects it before confirming.
+- After each save that includes income: "Target: ₹600 of ₹1,500, ₹900 to go." / "You reached your daily target of ₹1,500!" / "already reached today".
+- "how far am I from my target", "did I hit my target yesterday" -> progress, plus a streak of consecutive days.
+- Not included yet: an "off day" (no streak penalty), clearing a target, weekly targets.
+
+## Earlier: Step 6 (voice replies)
 A voice note in gets a voice note out; typed text gets text (override with `voice=always|never`).
 - **How:** reply text (in the user's language) -> Sarvam Bulbul text-to-speech -> ffmpeg -> **OGG/Opus mono**, the format WhatsApp plays as a voice note. Returned by `POST /process` as `reply_audio_base64` + `reply_audio_mime`; `ProcessResult.reply_audio` holds the raw bytes for the WhatsApp step.
 - **Never blocks the text reply:** if the voice service fails, the reply is still returned with a `voice_reply_failed` warning. Replies over `VOICE_MAX_CHARS` (default 400) stay text-only.

@@ -3,6 +3,7 @@ audio/text -> transcript -> language -> normalise -> English -> parse -> English
 The user never picks a language: it is detected from each message and the reply matches it.
 Every stage is logged with its latency."""
 import base64
+import json
 import logging
 import time
 from contextlib import contextmanager
@@ -29,6 +30,7 @@ class ProcessResult:
     reply_english: str = ""
     reply_user_language: str = ""
     warnings: list = field(default_factory=list)
+    intent: str = "unknown"
     reply_audio: bytes | None = field(default=None, repr=False)   # OGG/Opus voice note, when one was made
 
     def to_dict(self) -> dict:
@@ -104,7 +106,8 @@ def process(conn, user_id: str, audio: bytes | None = None, filename: str | None
     total_ms = int((time.perf_counter() - t0) * 1000)
     db.ensure_user(conn, user_id, language)
     db.log_message(conn, user_id, transcript=transcript, detected_language=language, english_text=english_text,
-                  reply_english=reply_en, reply_user_language=reply_user, latency_ms=total_ms)
+                  reply_english=reply_en, reply_user_language=reply_user, latency_ms=total_ms,
+                  intent=outcome.intent, actions_json=json.dumps(outcome.actions, ensure_ascii=False, default=str))
     log.info("user=%s language=%s total_ms=%d timings=%s warnings=%s", user_id, language, total_ms, timings, warnings)
 
-    return ProcessResult(transcript, language, normalized, english_text, entries, reply_en, reply_user, warnings, reply_audio)
+    return ProcessResult(transcript, language, normalized, english_text, entries, reply_en, reply_user, warnings, outcome.intent, reply_audio)

@@ -255,3 +255,44 @@ def parse_query(text: str) -> Query | None:
             period = key
             break
     return Query(kind, period, vocab.find_category(t), vocab.canonical_platform(t))
+
+
+# ------------------------------------------------------------------ daily income target
+TARGET_MIN, TARGET_MAX = 100, 50_000
+_EVERY_DAY = re.compile(r"\b(?:a|per|every|each)\s+day\b|\bdaily\b", re.I)
+_WANT_TO_EARN = re.compile(r"\b(?:want|aim|plan|hope|need|trying)\w*\s+to\s+(?:earn|make)\b", re.I)
+
+
+_SET_VERB = re.compile(r"\b(set|make|change|update|keep|fix|increase|decrease|raise|lower|reduce)\b", re.I)
+_TARGET_PHRASE = re.compile(r"\btarget\b\s*(?:is|to|of|at|=|:|should be|will be)?\s*(?:₹|rs\.?\s*)?\d|\b(?:daily|income) target\b", re.I)
+_PROGRESS_WORDS = re.compile(r"\b(progress|status|reach\w*|achiev\w*|hit|met|left|remaining|on track|far|close)\b", re.I)
+
+
+def _looks_like_log(text: str) -> bool:
+    """A message that reports money (got / spent ...) is a log, even if it mentions the target."""
+    return find_amount(text) is not None and bool(
+        vocab.STRONG_INCOME.search(text) or vocab.EXPENSE_CUES.search(text) or re.search(r"\bgot\b", text, re.I))
+
+
+def parse_target_set(text: str) -> float | None:
+    """'set my daily target to 1500', 'my target is 1500', 'I want to earn 1500 a day' -> 1500.
+    Questions ('did I reach my target of 1500?') and money reports ('got 1500, target reached') are not settings."""
+    amount = find_amount(text)
+    if amount is None:
+        return None
+    if re.search(r"\btarget\b", text, re.I) and not _QUESTION.search(text) and (
+            _SET_VERB.search(text) or _TARGET_PHRASE.search(text)) and not (_looks_like_log(text) and not _SET_VERB.search(text)):
+        return amount
+    if _WANT_TO_EARN.search(text) and _EVERY_DAY.search(text):
+        return amount
+    return None
+
+
+def parse_target_query(text: str) -> str | None:
+    """A question about the target ('how far am I from my target', 'did I hit my target yesterday').
+    Returns 'today' or 'yesterday', or None when the message is not about the target."""
+    if not re.search(r"\btarget\b", text, re.I) or parse_target_set(text) is not None or _looks_like_log(text):
+        return None
+    if not (_QUESTION.search(text) or _PROGRESS_WORDS.search(text)):
+        return None
+    return "yesterday" if re.search(r"\byesterday\b|\bkal\b", text, re.I) else "today"
