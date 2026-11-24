@@ -6,6 +6,7 @@ import array
 import io
 import math
 import os
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -26,20 +27,33 @@ _CLEAN_FILTER = (
 )
 
 
+def ffmpeg_path() -> str:
+    """Find ffmpeg: FFMPEG_BIN env var, then the binary bundled by `imageio-ffmpeg` (installed by uv),
+    then whatever `ffmpeg` is on PATH."""
+    explicit = os.getenv("FFMPEG_BIN")
+    if explicit:
+        return explicit
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # package missing or no bundled binary for this platform
+        return shutil.which("ffmpeg") or "ffmpeg"
+
+
 def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False) -> bytes:
     # Input goes through a temp file, not a pipe: phone M4A/MP4 files often keep their index at the end
     # and can't be decoded from a stream.
     with tempfile.NamedTemporaryFile(suffix=".bin") as src:
         src.write(raw)
         src.flush()
-        cmd = ["ffmpeg", "-v", "error", "-i", src.name, "-vn"]
+        cmd = [ffmpeg_path(), "-v", "error", "-i", src.name, "-vn"]
         if audio_filter:
             cmd += ["-af", audio_filter]
         cmd += ["-ar", str(SAMPLE_RATE), "-ac", "1", "-f", "s16le", "pipe:1"]
         try:
             proc = subprocess.run(cmd, capture_output=True, timeout=_FFMPEG_TIMEOUT)
         except FileNotFoundError as exc:
-            raise RuntimeError("ffmpeg is not installed. Install it (e.g. `apt install ffmpeg`).") from exc
+            raise RuntimeError("ffmpeg not found. Run `uv sync` (installs a bundled copy) or set FFMPEG_BIN in .env.") from exc
         except subprocess.TimeoutExpired as exc:
             raise AudioError("Audio took too long to process. Please send a shorter note.") from exc
     if proc.returncode != 0 or (not proc.stdout and not empty_ok):

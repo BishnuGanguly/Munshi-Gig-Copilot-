@@ -1,6 +1,6 @@
 import pytest
 
-from app.audio import prepare_audio, wav_info
+from app.audio import ffmpeg_path, prepare_audio, wav_info
 from app.errors import AudioError
 from tests.audio_helpers import make_audio, silent_audio
 
@@ -40,3 +40,14 @@ def test_quiet_audio_is_normalised():
     _, rms_before = wav_info(quiet)
     _, rms_after = wav_info(prepare_audio(quiet))
     assert rms_after > rms_before * 1.5
+
+
+def test_ffmpeg_path_env_override(monkeypatch):
+    monkeypatch.setenv("FFMPEG_BIN", "/custom/ffmpeg")
+    assert ffmpeg_path() == "/custom/ffmpeg"
+
+
+def test_ffmpeg_path_resolves_a_working_binary(monkeypatch):
+    import subprocess
+    monkeypatch.delenv("FFMPEG_BIN", raising=False)
+    assert subprocess.run([ffmpeg_path(), "-version"], capture_output=True).returncode == 0

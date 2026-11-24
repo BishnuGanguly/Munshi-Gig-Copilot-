@@ -5,7 +5,7 @@ Internally everything is English. The user speaks and is answered in the same la
 The WhatsApp channel comes after the backend is solid.
 
 ## Status: Step 2 (audio input) done
-- **Audio** (`app/audio`): OGG/Opus, MP3, WAV, M4A -> clean 16 kHz mono WAV with ffmpeg (loudness normalisation, silence trimming). Rejects empty, undecodable, silent and over-long (default 60 s) audio with friendly errors. Requires `ffmpeg` on the machine.
+- **Audio** (`app/audio`): OGG/Opus, MP3, WAV, M4A -> clean 16 kHz mono WAV with ffmpeg (loudness normalisation, silence trimming). Rejects empty, undecodable, silent and over-long (default 60 s) audio with friendly errors. ffmpeg comes bundled via `imageio-ffmpeg` (installed by `uv sync`); override with `FFMPEG_BIN`.
 - **Speech-to-text** (`app/stt`): `sarvam` (primary), `faster_whisper` (free offline fallback, optional install), `mock`. Retries with backoff, long audio split into 28 s chunks, low-confidence / empty transcripts raise a friendly "unclear" error, and a fallback chain via `STT_FALLBACK`.
 - **CLI**: `python scripts/transcribe_cli.py note.ogg` prints transcript, detected language and confidence.
 
@@ -24,10 +24,11 @@ Real implementations still to come: Step 3 (language layer), Step 4 (English cor
 
 ## Run
 ```bash
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload
-pytest
+uv sync                      # creates .venv and installs everything, including ffmpeg
+copy .env.example .env       # (cp on Mac/Linux), then edit it
+uv run pytest -q
+uv run python scripts/transcribe_cli.py note.ogg
+uv run uvicorn app.main:app --reload
 ```
 
 ## API
