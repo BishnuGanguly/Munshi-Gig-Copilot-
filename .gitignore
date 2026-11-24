@@ -4,3 +4,9 @@ __pycache__/
 .venv/
 data/*.db
 .pytest_cache/
+data/*.wav
+data/*.ogg
+*.opus
+reply.ogg
+reply.wav
+note*.ogg

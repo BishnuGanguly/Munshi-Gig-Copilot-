@@ -4,7 +4,7 @@ from app.main import create_app
 from tests.audio_helpers import make_audio, silent_audio
 
 KEYS = {"transcript", "detected_language", "normalized_text", "english_text", "entries", "reply_english",
-        "reply_user_language", "warnings"}
+        "reply_user_language", "warnings", "reply_audio_mime", "reply_audio_base64"}
 
 
 def client():

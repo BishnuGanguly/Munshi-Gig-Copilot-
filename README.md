@@ -4,7 +4,17 @@ Voice-first earnings and expense assistant for Indian gig workers.
 Internally everything is English. The user speaks and is answered in the same language, auto-detected per message.
 The WhatsApp channel comes after the backend is solid.
 
-## Status: Step 4 (English core) done
+## Status: Step 6 (voice replies) done
+A voice note in gets a voice note out; typed text gets text (override with `voice=always|never`).
+- **How:** reply text (in the user's language) -> Sarvam Bulbul text-to-speech -> ffmpeg -> **OGG/Opus mono**, the format WhatsApp plays as a voice note. Returned by `POST /process` as `reply_audio_base64` + `reply_audio_mime`; `ProcessResult.reply_audio` holds the raw bytes for the WhatsApp step.
+- **Never blocks the text reply:** if the voice service fails, the reply is still returned with a `voice_reply_failed` warning. Replies over `VOICE_MAX_CHARS` (default 400) stay text-only.
+- **Language rules:** Hinglish is spoken with a Hindi voice (re-rendered in Hindi script); languages without a voice, and replies that could not be translated, are spoken in English.
+- **Providers:** `TTS_PROVIDER=mock` (a beep; zero cost) or `sarvam`. `POST /speak` (text + language -> voice note) is there for trying voices.
+- **Try it:** `uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN` writes `reply.ogg` and a `reply.wav` that plays in any Windows player. `uv run python scripts/chat_cli.py --voice` saves each answer to `data/last_reply.wav`.
+- **Unverified (no live key here):** the Sarvam TTS language field name (the code retries with the alternate name on HTTP 400/422), speaker names for your model version, and how well digits like 1,150 are read aloud.
+- **Still not built:** the WhatsApp webhook that sends these voice notes (the remaining part of the original Step 6), goals, reminders, evaluation set.
+
+## Earlier: Step 4 (English core)
 Rules first, an optional LLM only as a last resort. **Nothing is saved until the user says yes.**
 - **Log:** "Got 1400 from Swiggy and spent 250 on petrol" -> read-back "Please confirm: income ₹1,400 from Swiggy; expense ₹250 on fuel. Is that correct?" -> `yes` saves, `no` discards. Handles several items, yesterday, `1.5k`, quantities (5 litres) vs money, savings, bonus/incentive.
 - **Unsure about type?** It asks ("Was ₹500 income or an expense?") instead of guessing. Amounts outside ₹1 to ₹50,000 are refused.
@@ -74,6 +84,7 @@ app/
 scripts/         transcribe_cli.py
   stt/           speech-to-text interface + providers
   translate/     languages, numbers, normalize, providers (sarvam, llm, mock), service
+  tts/           text-to-speech providers (sarvam, mock) + voice-note service
   core/          db (users, transactions, messages), parser, tools
 tests/
 ```

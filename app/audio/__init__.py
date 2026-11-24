@@ -42,7 +42,7 @@ def ffmpeg_path() -> str:
         return shutil.which("ffmpeg") or "ffmpeg"
 
 
-def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False) -> bytes:
+def _run_ffmpeg(raw: bytes, out_args: list[str], audio_filter: str | None = None, empty_ok: bool = False) -> bytes:
     # Input goes through a temp file, not a pipe: phone M4A/MP4 files often keep their index at the end
     # and can't be decoded from a stream. The file is closed before ffmpeg opens it (Windows can't share
     # an open NamedTemporaryFile with another process).
@@ -53,7 +53,7 @@ def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False)
         cmd = [ffmpeg_path(), "-v", "error", "-i", src_path, "-vn"]
         if audio_filter:
             cmd += ["-af", audio_filter]
-        cmd += ["-ar", str(SAMPLE_RATE), "-ac", "1", "-f", "s16le", "pipe:1"]
+        cmd += [*out_args, "pipe:1"]
         try:
             proc = subprocess.run(cmd, capture_output=True, timeout=_FFMPEG_TIMEOUT)
         except FileNotFoundError as exc:
@@ -69,18 +69,48 @@ def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False)
         log.warning("ffmpeg failed (code %s): %s", proc.returncode, proc.stderr.decode(errors="replace")[:500])
     if proc.returncode != 0 or (not proc.stdout and not empty_ok):
         raise AudioError("Could not read this audio file. Please record again.")
-    return _wrap_pcm(proc.stdout)
+    return proc.stdout
 
 
-def _wrap_pcm(pcm: bytes) -> bytes:
+def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False) -> bytes:
+    pcm = _run_ffmpeg(raw, ["-ar", str(SAMPLE_RATE), "-ac", "1", "-f", "s16le"], audio_filter, empty_ok)
+    return _wrap_pcm(pcm)
+
+
+def _wrap_pcm(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
     """Wrap raw 16-bit mono PCM in a WAV container with a correct header."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(SAMPLE_RATE)
+        w.setframerate(rate)
         w.writeframes(pcm)
     return buf.getvalue()
+
+
+# ------------------------------------------------------------------ output side (voice replies)
+VOICE_RATE = 24000
+
+
+def to_pcm_wav(raw: bytes, rate: int = VOICE_RATE) -> bytes:
+    """Any audio -> 16-bit mono WAV at `rate` (used to join text-to-speech chunks)."""
+    return _wrap_pcm(_run_ffmpeg(raw, ["-ar", str(rate), "-ac", "1", "-f", "s16le"]), rate)
+
+
+def concat_wavs(wavs: list[bytes], rate: int = VOICE_RATE) -> bytes:
+    if len(wavs) == 1:
+        return to_pcm_wav(wavs[0], rate)
+    pcm = b""
+    for w in wavs:
+        with wave.open(io.BytesIO(to_pcm_wav(w, rate))) as f:
+            pcm += f.readframes(f.getnframes())
+    return _wrap_pcm(pcm, rate)
+
+
+def to_voice_note(audio: bytes) -> bytes:
+    """Any audio -> OGG/Opus mono, the format WhatsApp shows as a playable voice note."""
+    return _run_ffmpeg(audio, ["-ac", "1", "-ar", str(VOICE_RATE), "-c:a", "libopus", "-b:a", "24k",
+                               "-application", "voip", "-f", "ogg"])
 
 
 def wav_info(wav: bytes) -> tuple[float, float]:
