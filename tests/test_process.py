@@ -61,3 +61,16 @@ def test_spoken_amount_words_become_digits_in_the_pipeline():
 def test_silent_audio_gets_friendly_400():
     r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("n.wav", silent_audio(), "audio/wav")})
     assert r.status_code == 400 and "silent" in r.json()["detail"].lower() or "speech" in r.json()["detail"].lower()
+
+
+def test_voice_note_to_confirmed_entry_end_to_end():
+    """Mock STT hears 'aaj swiggy se 1400 aaye aur petrol 250 ka dala'; the core parses and saves on 'yes'."""
+    c = client()
+    r = c.post("/process", data={"user_id": "e2e"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
+    assert [(e["type"], e["amount"], e["platform"], e["category"]) for e in r["entries"]] == [
+        ("income", 1400, "Swiggy", "earnings"), ("expense", 250, None, "fuel")]
+    assert all(e["status"] == "pending_confirmation" for e in r["entries"]) and "Please confirm" in r["reply_english"]
+    r2 = c.post("/process", data={"user_id": "e2e", "text": "yes"}).json()
+    assert r2["reply_english"] == "Saved. Today's profit is ₹1,150."
+    r3 = c.post("/process", data={"user_id": "e2e", "text": "how much did I earn today"}).json()
+    assert r3["reply_english"].startswith("Today you earned ₹1,400")

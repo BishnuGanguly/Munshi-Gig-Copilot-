@@ -9,8 +9,7 @@ from dataclasses import asdict, dataclass, field
 
 from app.audio import prepare_audio
 from app.core import db
-from app.core.parser import parse_english
-from app.core.tools import handle_english
+from app.core import engine
 from app.stt import get_stt
 from app.translate import get_language_service
 from app.translate.languages import DEFAULT_LANGUAGE, detect_text_language, normalize_code
@@ -73,10 +72,10 @@ def process(conn, user_id: str, audio: bytes | None = None, filename: str | None
     with stage("to_english", timings):
         english_text, w = lang.to_english(normalized, language)
         warnings += w
-    with stage("parse", timings):
-        entries = parse_english(english_text)
-    with stage("reply", timings):
-        reply_en = handle_english(english_text, entries)
+    with stage("core", timings):
+        outcome = engine.handle(conn, user_id, english_text)
+    entries, reply_en = outcome.entries, outcome.reply
+    warnings += outcome.warnings
     with stage("from_english", timings):
         reply_user, w = lang.from_english(reply_en, language)
         warnings += w

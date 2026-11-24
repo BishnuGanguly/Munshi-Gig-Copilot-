@@ -1,4 +1,4 @@
-"""SQLite storage: users, transactions, messages."""
+"""SQLite storage: users, transactions, messages, pending (unconfirmed) actions."""
 import sqlite3
 from pathlib import Path
 
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL REFERENCES users(id),
-    type TEXT NOT NULL CHECK (type IN ('income','expense')),
+    type TEXT NOT NULL CHECK (type IN ('income','expense','saving')),
     amount REAL NOT NULL,
     category TEXT,
     platform TEXT,
@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS messages (
     latency_ms INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS pending (
+    user_id TEXT PRIMARY KEY REFERENCES users(id),
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -38,7 +43,29 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Databases made by Step 1-3 only allow income/expense; rebuild the table to also allow 'saving'."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'").fetchone()
+    if row and "'saving'" not in row["sql"]:
+        conn.executescript("""
+            ALTER TABLE transactions RENAME TO transactions_old;
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL REFERENCES users(id),
+                type TEXT NOT NULL CHECK (type IN ('income','expense','saving')),
+                amount REAL NOT NULL,
+                category TEXT,
+                platform TEXT,
+                occurred_on TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO transactions SELECT * FROM transactions_old;
+            DROP TABLE transactions_old;
+        """)
 
 
 def ensure_user(conn: sqlite3.Connection, user_id: str, language: str | None = None) -> None:
