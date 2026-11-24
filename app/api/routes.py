@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app import pipeline
-from app.errors import SttUnavailableError
+from app.errors import ServiceUnavailableError
 
 router = APIRouter()
 
@@ -24,6 +24,6 @@ async def process(
                                   filename=audio.filename if audio else None, text=text)
     except ValueError as exc:  # AudioError / UnclearAudioError are ValueErrors
         raise HTTPException(status_code=400, detail=str(exc))
-    except SttUnavailableError as exc:
-        raise HTTPException(status_code=502, detail=f"Speech recognition is unavailable: {exc}")
+    except ServiceUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=f"A language or speech service is unavailable: {exc}")
     return result.to_dict()

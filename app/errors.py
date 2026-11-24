@@ -1,4 +1,4 @@
-"""Error types. ValueError subclasses map to HTTP 400, SttUnavailableError to 502."""
+"""Error types. ValueError subclasses map to HTTP 400, ServiceUnavailableError to 502."""
 
 
 class AudioError(ValueError):
@@ -9,5 +9,13 @@ class UnclearAudioError(ValueError):
     """Speech recognition returned nothing usable or low confidence."""
 
 
-class SttUnavailableError(RuntimeError):
+class ServiceUnavailableError(RuntimeError):
+    """An external service (speech or translation provider) failed."""
+
+
+class SttUnavailableError(ServiceUnavailableError):
     """Every configured speech-to-text provider failed (network, auth, quota)."""
+
+
+class TranslateUnavailableError(ServiceUnavailableError):
+    """Every configured translation provider failed (network, auth, quota)."""

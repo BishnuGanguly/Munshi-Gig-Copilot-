@@ -3,7 +3,8 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from tests.audio_helpers import make_audio, silent_audio
 
-KEYS = {"transcript", "detected_language", "english_text", "entries", "reply_english", "reply_user_language"}
+KEYS = {"transcript", "detected_language", "normalized_text", "english_text", "entries", "reply_english",
+        "reply_user_language", "warnings"}
 
 
 def client():
@@ -38,11 +39,23 @@ def test_empty_audio_rejected():
     assert r.status_code == 400
 
 
-def test_language_remembered_for_text():
+def test_language_remembered_for_digit_only_text():
     c = client()
     c.post("/process", data={"user_id": "u2"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")})
-    r = c.post("/process", data={"user_id": "u2", "text": "kitna kamaya"})
+    r = c.post("/process", data={"user_id": "u2", "text": "1400"})
+    assert r.json()["detected_language"] == "hi-IN"  # no script clue, so the user's last language is used
+
+
+def test_romanised_hindi_text_is_detected_as_hinglish():
+    r = client().post("/process", data={"user_id": "u3", "text": "aaj swiggy se 1400 aaye"})
+    assert r.json()["detected_language"] == "hi-Latn"
+    assert "1400" in r.json()["normalized_text"]
+
+
+def test_spoken_amount_words_become_digits_in_the_pipeline():
+    r = client().post("/process", data={"user_id": "u4", "text": "आज मैं दो सौ पचास रुपए का बचत किया।"})
     assert r.json()["detected_language"] == "hi-IN"
+    assert "250" in r.json()["normalized_text"]
 
 
 def test_silent_audio_gets_friendly_400():

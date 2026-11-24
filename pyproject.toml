@@ -17,6 +17,7 @@ dev = ["pytest>=8.0"]
 
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.0"]  # optional free offline STT fallback
+llm = ["anthropic>=0.40"]  # optional Claude-based translation fallback (paid)
 
 [tool.uv]
 package = false

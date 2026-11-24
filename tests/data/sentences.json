@@ -1,0 +1,754 @@
+{
+ "note": "Regional-language sentences (ta, kn, bn, te, mr) were written without a native speaker: have one review them before trusting scores. Keywords are loose English substrings for a sanity check.",
+ "sentences": [
+  {
+   "lang": "hi-IN",
+   "text": "आज स्विगी से चौदह सौ रुपये आए",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "पेट्रोल में ढाई सौ रुपये लगे",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "ज़ोमैटो से आठ सौ पचास मिले",
+   "numbers": [
+    "850"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "कल रैपिडो से डेढ़ हज़ार कमाए",
+   "numbers": [
+    "1500"
+   ],
+   "keywords": [
+    "rapido"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "गाड़ी की सर्विस में बारह सौ खर्च हुए",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service",
+    "repair",
+    "maintenance"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "मोबाइल रिचार्ज दो सौ निन्यानवे का करवाया",
+   "numbers": [
+    "299"
+   ],
+   "keywords": [
+    "recharge"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "आज चार सौ रुपये की बचत हुई",
+   "numbers": [
+    "400"
+   ],
+   "keywords": [
+    "sav"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "ईएमआई पाँच हज़ार दो सौ की गई",
+   "numbers": [
+    "5200"
+   ],
+   "keywords": [
+    "emi",
+    "installment"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "उबर से सत्रह सौ पचास रुपये मिले",
+   "numbers": [
+    "1750"
+   ],
+   "keywords": [
+    "uber"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "चालान में पाँच सौ रुपये भरे",
+   "numbers": [
+    "500"
+   ],
+   "keywords": [
+    "challan",
+    "fine"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "इस हफ़्ते कितना कमाया",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "सबसे अच्छा प्लेटफ़ॉर्म कौन सा है",
+   "numbers": [],
+   "keywords": [
+    "platform"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "डीज़ल सवा दो सौ का डाला",
+   "numbers": [
+    "225"
+   ],
+   "keywords": [
+    "diesel",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "पचहत्तर रुपये चाय में गए",
+   "numbers": [
+    "75"
+   ],
+   "keywords": [
+    "tea"
+   ]
+  },
+  {
+   "lang": "hi-IN",
+   "text": "इस महीने का सारा खर्च बताओ",
+   "numbers": [],
+   "keywords": [
+    "month",
+    "expense",
+    "spend"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "aaj swiggy se 1400 aaye",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "petrol 250 ka dala",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "zomato se dedh hazaar mile",
+   "numbers": [
+    "1500"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "kal rapido se saadhe teen sau kamaye",
+   "numbers": [
+    "350"
+   ],
+   "keywords": [
+    "rapido"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "puncture ke dhai sau lage",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "puncture"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "is hafte kitna kamaya",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "mera diwali goal kitna bacha",
+   "numbers": [],
+   "keywords": [
+    "goal",
+    "diwali"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "bike ki service mein barah sau kharcha hua",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service",
+    "maintenance"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "swigi se pachas rupaye aur zomaato se sau rupaye",
+   "numbers": [
+    "50",
+    "100"
+   ],
+   "keywords": [
+    "swiggy",
+    "zomato"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "recharge 299 ka karwaya",
+   "numbers": [
+    "299"
+   ],
+   "keywords": [
+    "recharge"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "galti ho gayi 250 nahi 300 tha",
+   "numbers": [
+    "250",
+    "300"
+   ],
+   "keywords": [
+    "mistake",
+    "wrong",
+    "error"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "kal ka kharcha batao",
+   "numbers": [],
+   "keywords": [
+    "yesterday",
+    "expense",
+    "spend"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "uber se do hazaar paanch sau mile",
+   "numbers": [
+    "2500"
+   ],
+   "keywords": [
+    "uber"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "challan ka paanch sau bhara",
+   "numbers": [
+    "500"
+   ],
+   "keywords": [
+    "challan",
+    "fine"
+   ]
+  },
+  {
+   "lang": "hi-Latn",
+   "text": "sabse achha platform kaun sa hai",
+   "numbers": [],
+   "keywords": [
+    "platform",
+    "best"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Got 1400 rupees from Swiggy today",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Spent 250 on petrol",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Zomato paid me 850 yesterday",
+   "numbers": [
+    "850"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "How much did I earn this week",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Which platform is best for me",
+   "numbers": [],
+   "keywords": [
+    "platform"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Bike service cost 1200 rupees",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Mobile recharge of 299",
+   "numbers": [
+    "299"
+   ],
+   "keywords": [
+    "recharge"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Add 500 rupees to my savings",
+   "numbers": [
+    "500"
+   ],
+   "keywords": [
+    "saving"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Uber gave me 1750 today",
+   "numbers": [
+    "1750"
+   ],
+   "keywords": [
+    "uber"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Paid a 500 rupee challan",
+   "numbers": [
+    "500"
+   ],
+   "keywords": [
+    "challan"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "It was 300, not 250",
+   "numbers": [
+    "300",
+    "250"
+   ],
+   "keywords": []
+  },
+  {
+   "lang": "en-IN",
+   "text": "Delete the last entry",
+   "numbers": [],
+   "keywords": [
+    "delete",
+    "last"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Show my expenses for this month",
+   "numbers": [],
+   "keywords": [
+    "expense",
+    "month"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "EMI of 5200 paid",
+   "numbers": [
+    "5200"
+   ],
+   "keywords": [
+    "emi"
+   ]
+  },
+  {
+   "lang": "en-IN",
+   "text": "Tea cost 75 rupees",
+   "numbers": [
+    "75"
+   ],
+   "keywords": [
+    "tea"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "இன்று ஸ்விக்கியில் 1400 ரூபாய் கிடைத்தது",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "பெட்ரோலுக்கு 250 ரூபாய் செலவு ஆனது",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "இந்த வாரம் எவ்வளவு சம்பாதித்தேன்",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "சோமாட்டோவில் 800 ரூபாய் கிடைத்தது",
+   "numbers": [
+    "800"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "வண்டி சர்வீஸுக்கு 1200 ரூபாய் ஆனது",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "ta-IN",
+   "text": "எந்த ஆப் சிறந்தது",
+   "numbers": [],
+   "keywords": [
+    "app",
+    "platform",
+    "best"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಇವತ್ತು ಸ್ವಿಗ್ಗಿಯಿಂದ 1400 ರೂಪಾಯಿ ಬಂತು",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಪೆಟ್ರೋಲ್‌ಗೆ 250 ರೂಪಾಯಿ ಖರ್ಚಾಯಿತು",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಈ ವಾರ ಎಷ್ಟು ಸಂಪಾದಿಸಿದೆ",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಜೊಮಾಟೊದಿಂದ 800 ರೂಪಾಯಿ ಸಿಕ್ಕಿತು",
+   "numbers": [
+    "800"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಗಾಡಿ ಸರ್ವೀಸ್‌ಗೆ 1200 ರೂಪಾಯಿ ಆಯಿತು",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "kn-IN",
+   "text": "ಯಾವ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಉತ್ತಮ",
+   "numbers": [],
+   "keywords": [
+    "platform",
+    "best"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "আজ সুইগি থেকে ১৪০০ টাকা পেয়েছি",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "পেট্রোলে ২৫০ টাকা খরচ হয়েছে",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "এই সপ্তাহে কত আয় করেছি",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "জোম্যাটো থেকে ৮০০ টাকা পেলাম",
+   "numbers": [
+    "800"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "গাড়ি সার্ভিসে ১২০০ টাকা লাগলো",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "bn-IN",
+   "text": "কোন প্ল্যাটফর্ম সবচেয়ে ভালো",
+   "numbers": [],
+   "keywords": [
+    "platform",
+    "best"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "ఈ రోజు స్విగ్గీ నుంచి 1400 రూపాయలు వచ్చాయి",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "పెట్రోల్‌కు 250 రూపాయలు ఖర్చు అయింది",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "ఈ వారం ఎంత సంపాదించాను",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "జొమాటో నుంచి 800 రూపాయలు వచ్చాయి",
+   "numbers": [
+    "800"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "బైక్ సర్వీస్‌కి 1200 రూపాయలు అయ్యాయి",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "te-IN",
+   "text": "ఏ ప్లాట్‌ఫామ్ బాగుంది",
+   "numbers": [],
+   "keywords": [
+    "platform",
+    "best",
+    "good"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "आज स्विगीकडून १४०० रुपये मिळाले",
+   "numbers": [
+    "1400"
+   ],
+   "keywords": [
+    "swiggy"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "पेट्रोलला २५० रुपये खर्च झाले",
+   "numbers": [
+    "250"
+   ],
+   "keywords": [
+    "petrol",
+    "fuel"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "या आठवड्यात किती कमावले",
+   "numbers": [],
+   "keywords": [
+    "week",
+    "earn"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "झोमॅटोकडून ८०० रुपये मिळाले",
+   "numbers": [
+    "800"
+   ],
+   "keywords": [
+    "zomato"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "गाडीच्या सर्व्हिसला १२०० रुपये लागले",
+   "numbers": [
+    "1200"
+   ],
+   "keywords": [
+    "service"
+   ]
+  },
+  {
+   "lang": "mr-IN",
+   "text": "कोणता प्लॅटफॉर्म सर्वोत्तम आहे",
+   "numbers": [],
+   "keywords": [
+    "platform",
+    "best"
+   ]
+  }
+ ]
+}

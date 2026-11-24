@@ -1,7 +1,9 @@
-"""Mock translator: passes text through unchanged (it does NOT translate). Placeholder for Step 3."""
+"""Mock translator: returns the text unchanged (it does NOT translate). For tests and zero-key development."""
 
 
 class MockTranslate:
+    name = "mock"
+
     def to_english(self, text: str, source_lang: str) -> str:
         return text
 
