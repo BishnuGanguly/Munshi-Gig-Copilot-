@@ -29,11 +29,17 @@ class WhisperStt:
 
     def transcribe(self, wav_bytes: bytes) -> Transcript:
         model = self._load()
-        with tempfile.NamedTemporaryFile(suffix=".wav") as f:
-            f.write(wav_bytes)
-            f.flush()
-            segments, info = model.transcribe(f.name, task="transcribe", vad_filter=True)
+        fd, path = tempfile.mkstemp(suffix=".wav")  # closed before use: Windows can't share open temp files
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(wav_bytes)
+            segments, info = model.transcribe(path, task="transcribe", vad_filter=True)
             segments = list(segments)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         text = " ".join(s.text.strip() for s in segments).strip()
         conf = math.exp(sum(s.avg_logprob for s in segments) / len(segments)) if segments else 0.0
         return Transcript(text=text, language=_BCP47.get(info.language, info.language), confidence=round(conf, 3))

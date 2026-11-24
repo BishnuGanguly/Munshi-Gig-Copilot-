@@ -73,7 +73,10 @@ class SarvamStt:
                 last = exc
             else:
                 if resp.status_code == 200:
-                    return resp.json()
+                    try:
+                        return resp.json()
+                    except ValueError:
+                        raise SttUnavailableError(f"Sarvam returned a non-JSON response: {resp.text[:200]!r}")
                 if resp.status_code in (401, 403):
                     raise SttUnavailableError(f"Sarvam rejected the API key (HTTP {resp.status_code}).")
                 if resp.status_code == 400:

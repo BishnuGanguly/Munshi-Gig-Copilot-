@@ -64,7 +64,12 @@ def test_sarvam_timeout_becomes_unavailable(monkeypatch):
 
 def test_missing_key():
     with pytest.raises(SttUnavailableError, match="SARVAM_API_KEY"):
-        SarvamStt(api_key="", transport=httpx.MockTransport(lambda r: httpx.Response(200))).transcribe(make_audio("wav", 1))
+        SarvamStt(transport=httpx.MockTransport(lambda r: httpx.Response(200))).transcribe(make_audio("wav", 1))
+
+
+def test_non_json_response_is_unavailable_not_a_crash():
+    with pytest.raises(SttUnavailableError, match="non-JSON"):
+        sarvam(lambda r: httpx.Response(200, text="oops")).transcribe(make_audio("wav", 1))
 
 
 def test_long_audio_is_chunked_and_joined():

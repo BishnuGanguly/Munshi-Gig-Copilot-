@@ -4,6 +4,7 @@ Steps: decode -> reject empty / too long / silent -> trim silence + normalise vo
 """
 import array
 import io
+import logging
 import math
 import os
 import shutil
@@ -13,6 +14,7 @@ import wave
 
 from app.errors import AudioError
 
+log = logging.getLogger("munshi.audio")
 SAMPLE_RATE = 16000
 MAX_SECONDS = float(os.getenv("MAX_AUDIO_SECONDS", "60"))
 SILENCE_RMS_THRESHOLD = float(os.getenv("SILENCE_RMS_THRESHOLD", "30"))  # on a 0..32767 scale
@@ -42,11 +44,13 @@ def ffmpeg_path() -> str:
 
 def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False) -> bytes:
     # Input goes through a temp file, not a pipe: phone M4A/MP4 files often keep their index at the end
-    # and can't be decoded from a stream.
-    with tempfile.NamedTemporaryFile(suffix=".bin") as src:
-        src.write(raw)
-        src.flush()
-        cmd = [ffmpeg_path(), "-v", "error", "-i", src.name, "-vn"]
+    # and can't be decoded from a stream. The file is closed before ffmpeg opens it (Windows can't share
+    # an open NamedTemporaryFile with another process).
+    fd, src_path = tempfile.mkstemp(suffix=".bin")
+    try:
+        with os.fdopen(fd, "wb") as src:
+            src.write(raw)
+        cmd = [ffmpeg_path(), "-v", "error", "-i", src_path, "-vn"]
         if audio_filter:
             cmd += ["-af", audio_filter]
         cmd += ["-ar", str(SAMPLE_RATE), "-ac", "1", "-f", "s16le", "pipe:1"]
@@ -56,6 +60,13 @@ def _ffmpeg(raw: bytes, audio_filter: str | None = None, empty_ok: bool = False)
             raise RuntimeError("ffmpeg not found. Run `uv sync` (installs a bundled copy) or set FFMPEG_BIN in .env.") from exc
         except subprocess.TimeoutExpired as exc:
             raise AudioError("Audio took too long to process. Please send a shorter note.") from exc
+    finally:
+        try:
+            os.unlink(src_path)
+        except OSError:
+            pass
+    if proc.returncode != 0:
+        log.warning("ffmpeg failed (code %s): %s", proc.returncode, proc.stderr.decode(errors="replace")[:500])
     if proc.returncode != 0 or (not proc.stdout and not empty_ok):
         raise AudioError("Could not read this audio file. Please record again.")
     return _wrap_pcm(proc.stdout)
