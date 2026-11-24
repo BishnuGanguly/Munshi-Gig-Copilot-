@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.audio_helpers import make_audio, silent_audio
 
 KEYS = {"transcript", "detected_language", "english_text", "entries", "reply_english", "reply_user_language"}
 
@@ -21,7 +22,7 @@ def test_process_text():
 
 
 def test_process_audio_uses_mock_stt():
-    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("note.ogg", b"fake-audio", "audio/ogg")})
+    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("note.ogg", make_audio("ogg"), "audio/ogg")})
     assert r.status_code == 200
     body = r.json()
     assert set(body) == KEYS
@@ -39,6 +40,11 @@ def test_empty_audio_rejected():
 
 def test_language_remembered_for_text():
     c = client()
-    c.post("/process", data={"user_id": "u2"}, files={"audio": ("n.ogg", b"x", "audio/ogg")})
+    c.post("/process", data={"user_id": "u2"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")})
     r = c.post("/process", data={"user_id": "u2", "text": "kitna kamaya"})
     assert r.json()["detected_language"] == "hi-IN"
+
+
+def test_silent_audio_gets_friendly_400():
+    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("n.wav", silent_audio(), "audio/wav")})
+    assert r.status_code == 400 and "silent" in r.json()["detail"].lower() or "speech" in r.json()["detail"].lower()
