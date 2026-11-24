@@ -8,9 +8,10 @@ import logging
 import re
 from datetime import datetime
 
-from . import actions, dates, parser, replies, tools
+from . import actions, dates, db, parser, replies, tools
 from .actions import REGISTRY, answer_query, ask_type, entry_out, readback, apply_type  # noqa: F401  (re-exported)
 from .llm_parser import get_llm_parser
+from .llm_router import build_context, get_llm_router
 from .registry import Context, Outcome
 from .vocab import HELP_RE
 
@@ -70,7 +71,9 @@ def _handle_pending(ctx: Context, pending: dict, text: str) -> Outcome | str:
     return Outcome("Please say yes to confirm or no to cancel.", intent="clarify")
 
 
-def handle(conn, user_id: str, text: str, now: datetime | None = None, llm=None) -> Outcome:
+def handle(conn, user_id: str, text: str, now: datetime | None = None, llm=None, router=None) -> Outcome:
+    """`llm` is the legacy extraction fallback, `router` the LLM understanding layer. Both are optional and
+    are only reached when the rules cannot route the message."""
     ctx = Context(conn, user_id, now or dates.now_ist())
     text = text.strip()
     note = ""
@@ -106,13 +109,23 @@ def handle(conn, user_id: str, text: str, now: datetime | None = None, llm=None)
 
     result = parser.parse_log(text, ctx.today)
     warnings: list[str] = []
-    if not result.entries and re.search(r"\d", text):
-        llm = llm or get_llm_parser()
-        if llm is not None:
-            entries = llm.parse(text, ctx.today)
-            if entries:
-                result = parser.LogParse(entries)
-                warnings.append("llm_parser_used")
+    # Ask the LLM understanding layer when the rules cannot place the message at all, or found an amount
+    # but could not tell income from expense (exactly where a model reads the sentence better than regexes).
+    if not result.entries or "needs_type" in result.problems:
+        router = router or get_llm_router(REGISTRY)
+        if router is not None:
+            out = router.route(ctx, text, build_context(ctx, None, db.recent_turns(conn, user_id),
+                                                        tools.get_target(conn, user_id, ctx.today)))
+            if out is not None:
+                out.reply = note + out.reply
+                return out
+        if not result.entries and re.search(r"\d", text):
+            llm = llm or get_llm_parser()
+            if llm is not None:
+                entries = llm.parse(text, ctx.today)
+                if entries:
+                    result = parser.LogParse(entries)
+                    warnings.append("llm_parser_used")
     if not result.entries:
         return Outcome(note + replies.NOT_UNDERSTOOD, intent="unknown", warnings=warnings)
     out = REGISTRY.execute("log_entries", {"entries": result.entries}, ctx)

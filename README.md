@@ -4,7 +4,16 @@ Voice-first earnings and expense assistant for Indian gig workers.
 Internally everything is English. The user speaks and is answered in the same language, auto-detected per message.
 The WhatsApp channel comes after the backend is solid.
 
-## Status: Phase 0 (foundation) and daily income target done
+## Status: LLM understanding layer done (off by default)
+`app/core/llm_router.py`. The model **chooses actions; our code executes them** - it never sees or writes the database.
+- **When it runs:** only after the rules fail, i.e. the message could not be placed at all, or an amount was found but not whether it was income or an expense. A message the rules fully understand never reaches the model, so the common path stays free and instant.
+- **One call, not a loop:** `messages.create` with the registry's `tool_definitions()` as the tool list, `tool_choice: auto`, effort `low` on `claude-haiku-5-5`. The static system prompt is sent with `cache_control` so the prefix caches; today's date, the target, and the last few turns go in the user turn.
+- **Guards (all in code, none trusted to the model):** arguments are schema-validated by the registry; **every number in the chosen arguments must appear in the rider's message**, or the call is dropped (no invented amounts); `user_id` is not an argument, so it cannot act for another user; at most `LLM_ROUTER_MAX_ACTIONS` (3) calls are read and the first usable one runs; write actions still only propose and the rider confirms; the message is sent as data and the prompt says to ignore instructions inside it. Refusals, network errors, a missing package and malformed output all fall back to the rules.
+- **Audit:** each routed message records `llm_router_used` in `warnings` and the action in `messages.actions_json`.
+- **Turn it on:** `uv sync --extra llm`, then `LLM_ROUTER=anthropic` and `ANTHROPIC_API_KEY=...` in `.env`. **This is paid** (about ₹0.03 per routed message on Haiku 5.5); with it off, nothing changes.
+- **Not verified:** no live API call has been made from here (no key, no network). The request shape is checked against the installed SDK (2.13.0) and the whole layer is tested against a fake client, including hostile output.
+
+## Earlier: Phase 0 (foundation) and daily income target
 **Action registry** (`app/core/registry.py`, `actions.py`): every capability is declared once (name, description, JSON input schema, read-only or write, handlers). `engine.py` is now only a router that calls `REGISTRY.execute(...)`. The same declarations are the LLM tool list (`REGISTRY.tool_definitions()`) and could back an MCP server later; a new feature is one `register(...)` call. Rules: arguments are schema-validated; `user_id` is never an argument (it comes from the Context); write actions only *propose* (pending + read-back) and apply on `commit` after the user says yes; every message records its intent and actions in `messages.intent / actions_json`.
 **Versioned migrations** (`db.MIGRATIONS`, `PRAGMA user_version`): add a numbered function to extend the schema; old databases upgrade in place. `db.recent_turns()` gives the last exchanges as context for the coming LLM layer.
 **Daily income target** (per user, confirmed before it changes, history kept so past days are judged by the target then):
