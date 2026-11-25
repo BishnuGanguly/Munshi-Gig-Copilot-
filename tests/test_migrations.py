@@ -32,3 +32,25 @@ def test_reconnecting_is_idempotent(tmp_path):
     db.connect(path).close()
     conn = db.connect(path)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_english_text_column_is_renamed(tmp_path):
+    """Migration 4: the column dates from the translate-to-English pipeline and now holds the
+    normalised transcript, so a database from that era is renamed in place with its rows kept."""
+    import sqlite3
+    path = str(tmp_path / "v3.db")
+    old = sqlite3.connect(path)
+    old.executescript("""CREATE TABLE users (id TEXT PRIMARY KEY, last_language TEXT, created_at TEXT);
+    CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, transcript TEXT,
+      detected_language TEXT, english_text TEXT, reply_english TEXT, reply_user_language TEXT,
+      latency_ms INTEGER, created_at TEXT, intent TEXT, actions_json TEXT);
+    INSERT INTO users (id) VALUES ('u');
+    INSERT INTO messages (user_id, english_text, reply_english, intent) VALUES ('u','Got 1400','Saved.','log');""")
+    old.execute("PRAGMA user_version = 3")
+    old.commit(), old.close()
+
+    conn = db.connect(path)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
+    assert "normalized_text" in cols and "english_text" not in cols
+    assert db.recent_turns(conn, "u")[0]["normalized_text"] == "Got 1400"      # the row survived
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION

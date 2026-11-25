@@ -140,8 +140,8 @@ def build_context(ctx: Context, pending: dict | None, turns: list[dict], target:
     if pending:
         lines.append(f"An action is already waiting for the rider's yes or no: {pending.get('action')}.")
     for t in turns[-4:]:
-        if t.get("english_text"):
-            lines.append(f"Earlier - rider: {t['english_text']}")
+        if t.get("normalized_text"):
+            lines.append(f"Earlier - rider: {t['normalized_text']}")
         if t.get("reply_english"):
             lines.append(f"Earlier - assistant: {t['reply_english']}")
     return "\n".join(lines)

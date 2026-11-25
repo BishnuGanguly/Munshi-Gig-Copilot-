@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS messages (
     user_id TEXT NOT NULL REFERENCES users(id),
     transcript TEXT,
     detected_language TEXT,
-    english_text TEXT,
+    normalized_text TEXT,
     reply_english TEXT,
     reply_user_language TEXT,
     latency_ms INTEGER,
@@ -91,8 +91,19 @@ def _m3_message_audit(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN actions_json TEXT")
 
 
+def _m4_rename_english_text(conn: sqlite3.Connection) -> None:
+    """`messages.english_text` dates from the translate-to-English pipeline. Nothing is translated now:
+    the column holds the normalised transcript the model was given, so give it that name."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
+    if "english_text" in cols and "normalized_text" not in cols:
+        conn.execute("ALTER TABLE messages RENAME COLUMN english_text TO normalized_text")
+    elif "normalized_text" not in cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN normalized_text TEXT")
+
+
 # Append new migrations here with the next number. Never edit or reorder old ones.
-MIGRATIONS = [(1, _m1_allow_saving), (2, _m2_targets), (3, _m3_message_audit)]
+MIGRATIONS = [(1, _m1_allow_saving), (2, _m2_targets), (3, _m3_message_audit),
+              (4, _m4_rename_english_text)]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
@@ -114,9 +125,9 @@ def ensure_user(conn: sqlite3.Connection, user_id: str, language: str | None = N
 
 def log_message(conn: sqlite3.Connection, user_id: str, **fields) -> None:
     conn.execute(
-        """INSERT INTO messages (user_id, transcript, detected_language, english_text,
+        """INSERT INTO messages (user_id, transcript, detected_language, normalized_text,
            reply_english, reply_user_language, latency_ms, intent, actions_json) VALUES (?,?,?,?,?,?,?,?,?)""",
-        (user_id, fields.get("transcript"), fields.get("detected_language"), fields.get("english_text"),
+        (user_id, fields.get("transcript"), fields.get("detected_language"), fields.get("normalized_text"),
          fields.get("reply_english"), fields.get("reply_user_language"), fields.get("latency_ms"),
          fields.get("intent"), fields.get("actions_json")),
     )
@@ -126,6 +137,6 @@ def log_message(conn: sqlite3.Connection, user_id: str, **fields) -> None:
 def recent_turns(conn: sqlite3.Connection, user_id: str, n: int = 6) -> list[dict]:
     """The user's last n exchanges, oldest first: context for the (future) LLM understanding layer."""
     rows = conn.execute(
-        "SELECT english_text, reply_english, intent FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        "SELECT normalized_text, reply_english, intent FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
         (user_id, n)).fetchall()
     return [dict(r) for r in reversed(rows)]

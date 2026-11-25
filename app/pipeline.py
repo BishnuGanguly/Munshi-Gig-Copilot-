@@ -99,7 +99,7 @@ def process(conn, user_id: str, audio: bytes | None = None, filename: str | None
     total_ms = int((time.perf_counter() - t0) * 1000)
     db.ensure_user(conn, user_id, language)
     db.log_message(conn, user_id, transcript=transcript, detected_language=language,
-                   english_text=outcome.reply and result.normalized_text, reply_english=outcome.reply,
+                   normalized_text=result.normalized_text, reply_english=outcome.reply,
                    reply_user_language=result.reply_user, latency_ms=total_ms, intent=outcome.intent,
                    actions_json=json.dumps(outcome.actions, ensure_ascii=False, default=str))
     log.info("user=%s language=%s total_ms=%d timings=%s warnings=%s", user_id, language, total_ms,

@@ -29,7 +29,7 @@ async def process(
     except ValueError as exc:  # AudioError / UnclearAudioError are ValueErrors
         raise HTTPException(status_code=400, detail=str(exc))
     except ServiceUnavailableError as exc:
-        raise HTTPException(status_code=502, detail=f"A language or speech service is unavailable: {exc}")
+        raise HTTPException(status_code=502, detail=f"A speech service is unavailable: {exc}")
     return result.to_dict()
 
 

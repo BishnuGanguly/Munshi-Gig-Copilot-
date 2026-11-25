@@ -7,7 +7,7 @@ it back for confirmation, and answers questions about their own money. Riders ne
 detected per message and the reply comes back in the same one.
 
 **Status: backend only.** There is no app and no WhatsApp bot yet; the channel plugs in on top of
-`POST /process`. 257 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
+`POST /process`. 258 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
 trusting any provider-facing part.
 
 ## The pipeline
@@ -43,32 +43,43 @@ Three things stay in code on purpose:
 ```bash
 uv sync                      # creates .venv and installs everything, including a bundled ffmpeg
 cp .env.example .env         # copy on Windows; then edit it
-uv run pytest -q             # 340 passed
+uv run pytest -q             # 258 passed
 uv run python scripts/chat_cli.py --fresh
 ```
 
-Out of the box every provider is a **mock**, so it runs with no API keys and at no cost. Set
-`STT_PROVIDER=sarvam`, `TTS_PROVIDER=sarvam`, `SARVAM_API_KEY`, plus `BRAIN=anthropic` and
-`ANTHROPIC_API_KEY`, in `.env` for the real thing. Without `BRAIN` set, nothing can be understood.
-
-A sample conversation:
+Speech and voice default to **mocks**, so the project installs and its tests run with no API keys and at
+no cost. The model is not mocked, it is simply **off** (`BRAIN=none`), so a fresh checkout understands
+nothing and says so. For a working assistant set, in `.env`:
 
 ```
-you>    set my daily target to 1500
+BRAIN=anthropic
+ANTHROPIC_API_KEY=...
+STT_PROVIDER=sarvam
+TTS_PROVIDER=sarvam
+SARVAM_API_KEY=...
+```
+
+A conversation. The rider's side is Hinglish, which is the model's job; the replies below are the real
+output of `app/core/actions.py`, and in practice each one is then reworded into the rider's own language:
+
+```
+you>    roz 1500 kamana hai
 munshi> Set your daily income target to ₹1,500? Say yes to confirm.
-you>    yes
+you>    haan
 munshi> Done. Your daily income target is ₹1,500.
-you>    Got 600 from Swiggy and spent 250 on petrol
+you>    Swiggy se 600 aaye aur petrol 250 ka dala
 munshi> Please confirm: income ₹600 from Swiggy; expense ₹250 on fuel. Is that correct?
-you>    yes
+you>    haan
 munshi> Saved. Today's profit is ₹350. Target: ₹600 of ₹1,500, ₹900 to go.
-you>    should be 300
+you>    250 nahi 300 tha
 munshi> Change the last entry from expense ₹250 on fuel to expense ₹300 on fuel? Say yes to confirm.
-you>    yes
+you>    haan
 munshi> Updated. The last entry is now expense ₹300 on fuel.
-you>    which platform is best
+you>    sabse achha platform kaunsa hai
 munshi> Your best platform this week is Swiggy with ₹600.
 ```
+
+The two `haan` turns cost nothing: confirmations never reach the model.
 
 ## What it can do
 
@@ -115,10 +126,12 @@ pending action and returns a read-back) and applies on `commit` after a yes.
 
 It **chooses actions**; it never sees or writes the database, and it never states a figure.
 
-- **Two calls at most per message**, not an agent loop: `messages.create` with the registry's tool
-  definitions, `tool_choice: auto`, effort `low` on `claude-haiku-5-5`; then a second call to reword the
-  reply (skipped when the rider wrote English). Both system prompts carry `cache_control`, so the prefix
-  caches; the date, target and last few turns go in the user turn.
+- **Two calls per message**, not an agent loop: `messages.create` with the registry's tool definitions,
+  `tool_choice: auto`, effort `low` on `claude-haiku-5-5`; then a second call that rewords the reply. Both
+  system prompts carry `cache_control`, so the prefix caches; the date, target and last few turns go in the
+  user turn. The second call happens even for an English-speaking rider, where it returns the sentence
+  unchanged — detecting that cheaply would mean guessing the language again, and Hinglish looks like
+  English to any such test. A confirmation makes **no** call at all.
 - **Guards, none of them trusted to the model:** schema validation; **every number in the chosen arguments
   must appear in the rider's own message**, or the call is dropped; **the reworded reply may not contain a
   number our English sentence did not**, or the English stands; no `user_id` argument; at most
@@ -164,13 +177,24 @@ curl -F user_id=u1 -F audio=@note.ogg localhost:8000/process
 curl -F user_id=u1 -F text="hello" -F voice=always localhost:8000/process
 ```
 
-Response fields: `transcript`, `detected_language`, `normalized_text`, `english_text`, `entries`,
-`reply_english`, `reply_user_language`, `intent`, `warnings`, `reply_audio_base64`, `reply_audio_mime`.
+Response fields:
+
+| Field | |
+|---|---|
+| `transcript` | what speech-to-text heard, or the text as typed |
+| `normalized_text` | amounts as digits, platform names canonical — what the model read |
+| `detected_language` | from the audio, or the language the reply was written in |
+| `entries` | the entries this message created, each with a `status` |
+| `reply_english` | our sentence; every figure in it came from SQL |
+| `reply_user_language` | the same sentence in the rider's language |
+| `intent`, `warnings` | what the message was taken to be, and anything that degraded |
+| `reply_audio_base64`, `reply_audio_mime` | the voice note, when one was made |
 
 `ProcessResult.reply_audio` holds the raw voice-note bytes for the coming WhatsApp step.
 
-Errors: `400` for unusable audio or input (empty, silent, too long, unclear); `502` when a speech or
-language provider is unavailable.
+Errors: `400` for unusable audio or input (empty, silent, too long, unclear); `502` when a speech service
+is unavailable. A model that is off or failing is **not** an error — the reply says it did not understand
+and `warnings` explains why.
 
 ### `POST /speak`
 
@@ -192,7 +216,7 @@ uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN
 
 ## Data
 
-SQLite, with versioned migrations (`db.MIGRATIONS` + `PRAGMA user_version`, currently version 3). Old
+SQLite, with versioned migrations (`db.MIGRATIONS` + `PRAGMA user_version`, currently version 4). Old
 databases upgrade in place; extend the schema by appending a numbered function, never by editing an old one.
 
 | Table | Holds |
@@ -201,7 +225,7 @@ databases upgrade in place; extend the schema by appending a numbered function, 
 | `transactions` | type (`income` / `expense` / `saving`), amount, category, platform, date |
 | `targets` | daily income targets with `effective_from`, so history is preserved |
 | `pending` | the one unconfirmed action per rider, with its timestamp |
-| `messages` | transcript, language, English text, both replies, latency, `intent`, `actions_json` |
+| `messages` | transcript, `normalized_text` (what the model read), language, both replies, latency, `intent`, `actions_json` |
 
 `messages.intent` and `actions_json` are the audit trail; `db.recent_turns()` reads them back as
 conversation context.
@@ -226,7 +250,7 @@ Optional extras: `uv sync --extra llm` (Claude) and `uv sync --extra whisper` (o
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 257 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+**Covered by the 258 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
 action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, and
 the model-facing code against fake clients — including output that invents numbers or tries to act for
 another rider.
@@ -274,7 +298,7 @@ app/
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
 scripts/               chat_cli, process_cli, transcribe_cli, speak_cli
-tests/                 257 tests; tests/data/sentences.json holds the 75 sample sentences
+tests/                 258 tests; tests/data/sentences.json holds the 75 sample sentences
 ```
 
 ## History
