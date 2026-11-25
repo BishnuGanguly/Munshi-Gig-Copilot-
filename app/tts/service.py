@@ -58,3 +58,21 @@ def make_voice_note(reply_user: str, reply_en: str, language: str, translated: b
         log.warning("voice reply failed: %s", exc)
         return None, warnings + [f"voice_reply_failed: {exc}"]
     return ogg, warnings
+
+
+def speak(text: str, language: str, tts: TtsProvider | None = None) -> tuple[bytes | None, list[str]]:
+    """Synthesise a reply that is ALREADY in the language to speak (the LLM-first path).
+
+    No language juggling and no translation service: the brain's renderer produced the text and its code.
+    Returns (ogg_opus_bytes | None, warnings) and never raises - the text reply always stands.
+    """
+    if not text.strip():
+        return None, []
+    if len(text) > max_chars():
+        return None, ["voice_skipped_long_reply"]
+    try:
+        provider = tts or get_tts()
+        return to_voice_note(provider.synthesize(text, language)), []
+    except (ServiceUnavailableError, AudioError, ValueError, RuntimeError) as exc:
+        log.warning("voice reply failed: %s", exc)
+        return None, [f"voice_reply_failed: {exc}"]

@@ -4,9 +4,12 @@
     uv run python scripts/chat_cli.py --debug    # also show language, normalised text and English text
     uv run python scripts/chat_cli.py --fresh    # start with an empty database
     uv run python scripts/chat_cli.py --voice    # answer every message with a voice note: data/last_reply.wav
+    uv run python scripts/chat_cli.py --llm      # LLM-first pipeline (needs BRAIN=anthropic + ANTHROPIC_API_KEY)
+    uv run python scripts/chat_cli.py --rules    # the original pipeline, whatever .env says
 
 Uses the providers in your .env. Data is kept in data/chat.db. Type /quit to leave."""
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -25,11 +28,17 @@ def main() -> int:
     logging.basicConfig(level="WARNING")
     debug = "--debug" in sys.argv
     voice = "always" if "--voice" in sys.argv else "auto"
+    if "--llm" in sys.argv:
+        os.environ["PIPELINE"] = "llm"
+    if "--rules" in sys.argv:
+        os.environ["PIPELINE"] = "rules"
     path = ROOT / "data" / "chat.db"
     if "--fresh" in sys.argv and path.exists():
         path.unlink()
     conn = db.connect(str(path))
-    print("Munshi chat. Try: Got 1400 from Swiggy and spent 250 on petrol   (/quit to leave)")
+    from app.pipeline import which_pipeline
+    print(f"Munshi chat [pipeline={which_pipeline()}]. Try: Got 1400 from Swiggy and spent 250 on petrol"
+          "   (/quit to leave)")
     while True:
         try:
             line = input("you> ").strip()

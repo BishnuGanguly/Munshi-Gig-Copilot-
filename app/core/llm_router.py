@@ -108,8 +108,9 @@ class LlmRouter:
     """Chooses registry actions for a message. `client` is injectable for tests."""
 
     def __init__(self, registry: Registry, client=None, model: str | None = None,
-                 max_actions: int = MAX_ACTIONS) -> None:
+                 max_actions: int = MAX_ACTIONS, system: str | None = None) -> None:
         self.registry = registry
+        self.system = system or SYSTEM
         self.model = model or os.getenv("LLM_ROUTER_MODEL", DEFAULT_MODEL)
         self.max_actions = max_actions
         self._client = client
@@ -127,7 +128,7 @@ class LlmRouter:
             model=self.model,
             max_tokens=1024,
             output_config={"effort": "low"},                       # a router: speed over deliberation
-            system=[{"type": "text", "text": SYSTEM % self.max_actions,
+            system=[{"type": "text", "text": self.system % self.max_actions,
                      "cache_control": {"type": "ephemeral"}}],      # static prefix, so it caches
             tools=self.registry.tool_definitions(),
             tool_choice={"type": "auto"},

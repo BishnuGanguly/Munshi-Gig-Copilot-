@@ -11,9 +11,44 @@ parsing, rules and maths live in one language.
 `POST /process`. 340 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
 trusting any provider-facing part.
 
-## The pipeline
+## Two pipelines
 
-Every message, voice or text, takes one path (`app/pipeline.py`, which logs each stage's latency):
+`PIPELINE` in `.env` chooses how a message is understood. Both share the audio and voice ends.
+
+**`llm` — the LLM-first path** (`app/core/brain.py`), being moved to:
+
+```
+voice note → Sarvam STT → numbers.py (दो सौ पचास → 250)
+           → yes / no?  answered locally, no model call
+           → the model picks an action (reading the rider's own language)
+           → our code validates it, runs it, computes every number
+           → the model renders our English sentence in the rider's language
+           → Sarvam TTS → voice note
+```
+
+No translation chain, no language detection, no cue-word regexes. Measurement drove this: with the rules
+alone, logging worked in every language (100% on regional-language samples, because `numbers.py` does the
+real work), but questions scored 42% in Hindi and **0%** in Tamil, Kannada, Bengali, Telugu and Marathi.
+A multilingual model reads those directly.
+
+Three things stay in code on purpose:
+
+- **Amounts.** `numbers.py` converts spoken amounts to digits before the model sees them. That is
+  arithmetic, not understanding — and the number guard compares the model's figures against the rider's
+  text, so the text has to carry digits for it to work at all.
+- **Yes and no.** The commonest message in the app, answered in a few lines with no round-trip.
+- **Every number the rider is told.** Figures come from SQL in `tools.py`. The model only *rewords* our
+  sentence, and a guard rejects the rewording if it contains a number we did not state.
+
+Needs `BRAIN=anthropic` and `ANTHROPIC_API_KEY`; without them it answers "I could not understand" rather
+than guessing. **Every message costs a round-trip** (roughly ₹10 per rider per month on Haiku), so there is
+no free offline path.
+
+**`rules` — the original path** (default for now, `app/core/engine.py`), kept so the two can be compared on
+real voice notes:
+
+```
+voice note or text
 
 ```
 voice note or text
@@ -35,6 +70,7 @@ uv sync                      # creates .venv and installs everything, including 
 cp .env.example .env         # copy on Windows; then edit it
 uv run pytest -q             # 340 passed
 uv run python scripts/chat_cli.py --fresh
+uv run python scripts/chat_cli.py --llm --fresh   # the LLM-first pipeline
 ```
 
 Out of the box every provider is a **mock**, so it runs with no API keys and at no cost. Set
@@ -205,6 +241,7 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 | **Speech-to-text** | `STT_PROVIDER` (`mock`/`sarvam`/`faster_whisper`), `STT_FALLBACK`, `STT_MIN_CONFIDENCE`, `SARVAM_API_KEY`, `SARVAM_MODEL`, `SARVAM_LANGUAGE_CODE`, `SARVAM_MODE`, `WHISPER_MODEL` |
 | **Translation** | `TRANSLATE_PROVIDER` (`mock`/`sarvam`/`llm`), `TRANSLATE_FALLBACK`, `SARVAM_TRANSLATE_MODEL`, `SARVAM_NUMERALS_FORMAT`, `SARVAM_ROMAN_SCRIPT`, `LLM_TRANSLATE_MODEL` |
 | **Voice replies** | `TTS_PROVIDER` (`mock`/`sarvam`), `SARVAM_TTS_MODEL`, `SARVAM_TTS_SPEAKER`, `VOICE_MAX_CHARS` |
+| **Pipeline** | `PIPELINE` (`rules`/`llm`), `BRAIN` (`none`/`anthropic`), `BRAIN_MODEL`, `BRAIN_RENDER_MODEL` |
 | **LLM layer** | `LLM_ROUTER` (`none`/`anthropic`), `LLM_ROUTER_MODEL`, `LLM_ROUTER_MAX_ACTIONS`, `PARSER_LLM`, `LLM_PARSE_MODEL`, `ANTHROPIC_API_KEY` |
 | **Audio** | `MAX_AUDIO_SECONDS`, `SILENCE_RMS_THRESHOLD`, `FFMPEG_BIN` |
 | **App** | `DB_PATH`, `LOG_LEVEL` |

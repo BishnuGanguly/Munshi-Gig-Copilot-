@@ -5,16 +5,17 @@ Every stage is logged with its latency."""
 import base64
 import json
 import logging
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 
 from app.audio import prepare_audio
-from app.core import db
-from app.core import engine
+from app.core import brain, db, engine
 from app.stt import get_stt
 from app.translate import get_language_service
 from app.tts import make_voice_note
+from app.tts.service import speak
 from app.translate.languages import DEFAULT_LANGUAGE, detect_text_language, normalize_code
 
 log = logging.getLogger("munshi.pipeline")
@@ -53,6 +54,15 @@ def stage(name: str, timings: dict):
 
 
 VOICE_MODES = ("auto", "always", "never")
+PIPELINES = ("rules", "llm")
+
+
+def which_pipeline() -> str:
+    """`PIPELINE=llm` selects the LLM-first path (app/core/brain.py); `rules` (default) the original one."""
+    name = os.getenv("PIPELINE", "rules")
+    if name not in PIPELINES:
+        raise ValueError(f"PIPELINE must be one of {', '.join(PIPELINES)}")
+    return name
 
 
 def process(conn, user_id: str, audio: bytes | None = None, filename: str | None = None,
@@ -81,26 +91,43 @@ def process(conn, user_id: str, audio: bytes | None = None, filename: str | None
         transcript = text.strip()
         language = detect_text_language(transcript, last_language)
 
-    lang = get_language_service()
     warnings: list[str] = []
-    with stage("normalize", timings):
-        normalized = lang.normalize(transcript)
-    with stage("to_english", timings):
-        english_text, w = lang.to_english(normalized, language)
-        warnings += w
-    with stage("core", timings):
-        outcome = engine.handle(conn, user_id, english_text)
-    entries, reply_en = outcome.entries, outcome.reply
-    warnings += outcome.warnings
-    with stage("from_english", timings):
-        reply_user, w = lang.from_english(reply_en, language)
-        warnings += w
+    if which_pipeline() == "llm":
+        # LLM-first: no translation chain, no cue-word rules. The reply comes back already in the
+        # rider's language, and its own code says what to speak it in.
+        with stage("brain", timings):
+            result = brain.handle(conn, user_id, transcript, now=None)
+        outcome = result.outcome
+        normalized, english_text = result.normalized_text, result.normalized_text
+        entries, reply_en, reply_user = outcome.entries, outcome.reply, result.reply_user
+        language = result.reply_language if audio is None else language
+        speak_language = brain.speakable(result.reply_language)
+        warnings += result.warnings
+        lang = None
+    else:
+        lang = get_language_service()
+        with stage("normalize", timings):
+            normalized = lang.normalize(transcript)
+        with stage("to_english", timings):
+            english_text, w = lang.to_english(normalized, language)
+            warnings += w
+        with stage("core", timings):
+            outcome = engine.handle(conn, user_id, english_text)
+        entries, reply_en = outcome.entries, outcome.reply
+        warnings += outcome.warnings
+        with stage("from_english", timings):
+            reply_user, w = lang.from_english(reply_en, language)
+            warnings += w
+        speak_language = None
 
     reply_audio = None
     if voice == "always" or (voice == "auto" and audio is not None):
         with stage("voice", timings):
-            reply_audio, w = make_voice_note(reply_user, reply_en, language,
-                                             translated="reply_not_translated" not in warnings, lang_service=lang)
+            if lang is None:
+                reply_audio, w = speak(reply_user, speak_language)
+            else:
+                reply_audio, w = make_voice_note(reply_user, reply_en, language,
+                                                 translated="reply_not_translated" not in warnings, lang_service=lang)
             warnings += w
 
     total_ms = int((time.perf_counter() - t0) * 1000)
