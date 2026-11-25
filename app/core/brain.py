@@ -24,6 +24,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from app.llm import LlmProvider, get_provider
 from app.text import normalize, normalize_digits
 from . import db, replies, tools, validate
 from .actions import REGISTRY
@@ -32,7 +33,6 @@ from .registry import ActionError, Context, Outcome, Registry
 
 log = logging.getLogger("munshi.brain")
 
-DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_LANGUAGE = "en-IN"
 MAX_ACTIONS = int(os.getenv("BRAIN_MAX_ACTIONS", "3"))
 
@@ -149,47 +149,26 @@ def build_context(ctx: Context, pending: dict | None, turns: list[dict], target:
 
 # ------------------------------------------------------------------ the two model calls
 class Understander:
-    """Chooses registry actions for a message. `client` is injectable for tests."""
+    """Chooses registry actions for a message, through whichever provider is configured."""
 
-    def __init__(self, registry: Registry, client=None, model: str | None = None,
-                 max_actions: int = MAX_ACTIONS, system: str | None = None) -> None:
+    def __init__(self, registry: Registry, provider: LlmProvider, max_actions: int = MAX_ACTIONS,
+                 system: str | None = None) -> None:
         self.registry = registry
+        self.provider = provider
         self.system = system or SYSTEM_UNDERSTAND
-        self.model = model or os.getenv("BRAIN_MODEL") or DEFAULT_MODEL
         self.max_actions = max_actions
-        self._client = client
-
-    def _get_client(self):
-        if self._client is None:
-            import anthropic  # ImportError is caught by the caller
-            self._client = anthropic.Anthropic()
-        return self._client
 
     def _call(self, text: str, context: str) -> list[tuple[str, dict]]:
-        response = self._get_client().messages.create(
-            model=self.model,
-            max_tokens=1024,
-            output_config={"effort": "low"},                   # a router: speed over deliberation
-            system=[{"type": "text", "text": self.system % self.max_actions,
-                     "cache_control": {"type": "ephemeral"}}],  # static prefix, so it caches
-            tools=self.registry.tool_definitions(),
-            tool_choice={"type": "auto"},
-            messages=[{"role": "user", "content": f"{context}\n\nThe rider says: {text}"}],
-        )
-        if getattr(response, "stop_reason", None) == "refusal":
-            log.warning("understanding refused: %s", getattr(response, "stop_details", None))
-            return []
-        calls = [(b.name, b.input) for b in response.content if getattr(b, "type", "") == "tool_use"]
-        usage = getattr(response, "usage", None)
-        log.info("understand model=%s calls=%s cache_read=%s", self.model, [c[0] for c in calls],
-                 getattr(usage, "cache_read_input_tokens", None))
-        return calls[: self.max_actions]
+        calls = self.provider.choose_actions(
+            self.system % self.max_actions, self.registry.tool_definitions(),
+            f"{context}\n\nThe rider says: {text}")
+        return [(c.name, c.args) for c in calls[: self.max_actions]]
 
     def understand(self, ctx: Context, text: str, context: str) -> Outcome | None:
         """Execute the first usable action the model chose, or None if it gave us nothing we can trust."""
         try:
             calls = self._call(text, context)
-        except Exception as exc:               # network, auth, missing package, bad response shape
+        except Exception as exc:               # a provider failing must never break the conversation
             log.warning("understanding failed: %s: %s", type(exc).__name__, exc)
             return None
         for name, args in calls:
@@ -210,34 +189,18 @@ class Understander:
 class Renderer:
     """Turns our English reply into the rider's language. Never raises: on any failure the English stands."""
 
-    def __init__(self, client=None, model: str | None = None) -> None:
-        self.model = model or os.getenv("BRAIN_RENDER_MODEL") or DEFAULT_MODEL
-        self._client = client
-
-    def _get_client(self):
-        if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic()
-        return self._client
+    def __init__(self, provider: LlmProvider) -> None:
+        self.provider = provider
 
     def render(self, english: str, rider_message: str) -> tuple[str, str, list[str]]:
         """Returns (reply, language_code, warnings)."""
         try:
-            response = self._get_client().messages.create(
-                model=self.model,
-                max_tokens=512,
-                output_config={"effort": "low"},
-                system=[{"type": "text", "text": SYSTEM_RENDER, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content":
-                           f"The rider wrote: {rider_message}\n\nThe assistant's English reply: {english}"}],
-            )
+            raw = self.provider.complete(
+                SYSTEM_RENDER, f"The rider wrote: {rider_message}\n\nThe assistant's English reply: {english}")
         except Exception as exc:
             log.warning("render failed: %s: %s", type(exc).__name__, exc)
             return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        if getattr(response, "stop_reason", None) == "refusal":
-            return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        raw = "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
-        m = re.search(r"\{.*\}", raw, re.S)
+        m = re.search(r"\{.*\}", raw or "", re.S)
         if not m:
             return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
         try:
@@ -259,15 +222,17 @@ class Renderer:
 
 # ------------------------------------------------------------------ wiring
 def enabled() -> bool:
-    return os.getenv("BRAIN", "none") == "anthropic"
+    return get_provider() is not None
 
 
 def get_understander() -> Understander | None:
-    return Understander(REGISTRY) if enabled() else None
+    provider = get_provider()
+    return Understander(REGISTRY, provider) if provider else None
 
 
 def get_renderer() -> Renderer | None:
-    return Renderer() if enabled() else None
+    provider = get_provider()
+    return Renderer(provider) if provider else None
 
 
 def preprocess(text: str) -> str:

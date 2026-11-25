@@ -23,3 +23,8 @@ class TranslateUnavailableError(ServiceUnavailableError):
 
 class TtsUnavailableError(ServiceUnavailableError):
     """Text-to-speech failed (network, auth, quota). Never blocks the text reply."""
+
+
+class LlmUnavailableError(ServiceUnavailableError):
+    """A model provider failed (network, auth, quota, malformed reply). Never fatal: the caller falls back
+    to the next provider, or answers honestly that it did not understand."""

@@ -7,7 +7,7 @@ it back for confirmation, and answers questions about their own money. Riders ne
 detected per message and the reply comes back in the same one.
 
 **Status: backend only.** There is no app and no WhatsApp bot yet; the channel plugs in on top of
-`POST /process`. 258 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
+`POST /process`. 441 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
 trusting any provider-facing part.
 
 ## The pipeline
@@ -43,7 +43,7 @@ Three things stay in code on purpose:
 ```bash
 uv sync                      # creates .venv and installs everything, including a bundled ffmpeg
 cp .env.example .env         # copy on Windows; then edit it
-uv run pytest -q             # 258 passed
+uv run pytest -q             # 441 passed
 uv run python scripts/chat_cli.py --fresh
 ```
 
@@ -52,12 +52,14 @@ no cost. The model is not mocked, it is simply **off** (`BRAIN=none`), so a fres
 nothing and says so. For a working assistant set, in `.env`:
 
 ```
-BRAIN=anthropic
-ANTHROPIC_API_KEY=...
+BRAIN=sarvam,anthropic       # Sarvam first; Claude only if Sarvam is down (see "Model providers")
 STT_PROVIDER=sarvam
 TTS_PROVIDER=sarvam
-SARVAM_API_KEY=...
+SARVAM_API_KEY=...           # one key serves speech, voice and the model
 ```
+
+Then run `uv run python scripts/check_llm.py` once. Nothing here has been tried against a live provider, and
+that script says which assumption is wrong.
 
 A conversation. The rider's side is Hinglish, which is the model's job; the replies below are the real
 output of `app/core/actions.py`, and in practice each one is then reworded into the rider's own language:
@@ -104,8 +106,8 @@ One intent per message. Unconfirmed actions expire after 30 minutes.
 2. **Everything else** — one model call picks an action; our code validates and runs it.
 3. **The reply** — our English sentence, reworded by the model into the rider's language.
 
-Without `BRAIN=anthropic` step 2 cannot run, and the assistant says it did not understand rather than
-guessing.
+Without a configured provider (`BRAIN=none`) step 2 cannot run, and the assistant says it did not
+understand rather than guessing.
 
 ### The action registry
 
@@ -122,26 +124,74 @@ Invariants enforced in code: arguments are schema-validated; **`user_id` is neve
 from the `Context`), so no caller can act for another rider; a write action only *proposes* (it stores a
 pending action and returns a read-back) and applies on `commit` after a yes.
 
+### Model providers
+
+The model sits behind a two-method interface (`app/llm/base.py`): `choose_actions(system, tools, user)` and
+`complete(system, user)`. Nothing outside `app/llm/` knows a vendor's name or wire format, so providers are
+swappable, and chainable.
+
+```
+BRAIN=sarvam                one provider
+BRAIN=sarvam,anthropic      a chain: the next answers only when the one before it is down
+```
+
+| Name | Speaks | Notes |
+|---|---|---|
+| `sarvam` | OpenAI-style | India-hosted, billed in rupees; reuses `SARVAM_API_KEY`. Default model `sarvam-105b` |
+| `anthropic` | Anthropic SDK | Claude; prompt caching, low effort. Key, or `ant auth login`. `uv sync --extra llm` |
+| `openai`, `groq`, `openrouter`, `ollama` | OpenAI-style | presets; Ollama needs no key |
+| `openai_compat` | OpenAI-style | anything else: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH`, a model |
+
+Adding a provider that speaks the OpenAI protocol is one entry in `PRESETS`; one with its own protocol is a
+class implementing the interface. Models and URLs are per-provider (`BRAIN_MODEL_<NAME>`,
+`BRAIN_BASE_URL_<NAME>`); `BRAIN_MODEL` is shorthand for the first provider's model.
+
+What the adapters absorb, so the rest of the code never sees it:
+
+- **Tool-call shape.** Our neutral `{name, description, input_schema}` becomes `{"type":"function",
+  "function":{..., "parameters"}}` for OpenAI-style providers, and the reply's `arguments` — a JSON
+  *string* there, a dict for Claude — is parsed. Malformed arguments are "no call", never a crash.
+- **Schema dialect.** Our schemas allow `null` on optional fields; strict providers reject that, so
+  OpenAI-style providers are sent a simplified schema. Validation still runs against the original.
+- **Reasoning leaks.** A `<think>…</think>` block in a reply is stripped; a reply cut off mid-thought is
+  treated as empty.
+- **Parallel tool calls** cannot be switched off on every model, so the app caps them itself.
+- **Failure.** Every provider failure — network, auth, quota, malformed reply — becomes one
+  `LlmUnavailableError`. A chain moves on only for that. A model that simply chose no action is *not*
+  retried on the next vendor: that would double the cost and hide a quality problem. A bug is not an outage
+  and is never swallowed.
+
+A misspelt provider name stops the app at startup, not on the first rider's message.
+
+`tests/test_llm_equivalence.py` replays the same scenarios through the Anthropic and the OpenAI-style
+adapter, each with its own response shape, and asserts the outcomes are identical — including that the same
+guards refuse the same bad calls.
+
 ### What the model is and isn't trusted with
 
 It **chooses actions**; it never sees or writes the database, and it never states a figure.
 
-- **Two calls per message**, not an agent loop: `messages.create` with the registry's tool definitions,
-  `tool_choice: auto`, effort `low` on `claude-haiku-5-5`; then a second call that rewords the reply. Both
-  system prompts carry `cache_control`, so the prefix caches; the date, target and last few turns go in the
-  user turn. The second call happens even for an English-speaking rider, where it returns the sentence
-  unchanged — detecting that cheaply would mean guessing the language again, and Hinglish looks like
-  English to any such test. A confirmation makes **no** call at all.
+- **Two calls per message**, not an agent loop: one `choose_actions` with the registry's tool definitions,
+  then one `complete` that rewords the reply. The second call happens even for an English-speaking rider,
+  where it returns the sentence unchanged — detecting that cheaply would mean guessing the language again,
+  and Hinglish looks like English to any such test. A confirmation makes **no** call at all. The date,
+  target and last few turns go in the user turn.
 - **Guards, none of them trusted to the model:** schema validation; **every number in the chosen arguments
   must appear in the rider's own message**, or the call is dropped; **the reworded reply may not contain a
   number our English sentence did not**, or the English stands; no `user_id` argument; at most
   `BRAIN_MAX_ACTIONS` calls are read and the first usable one runs; writes still need confirmation; the
-  message is sent as data and the prompt says to ignore instructions inside it. Refusals, network errors,
-  a missing package and malformed output all end in an honest "I could not understand".
+  message is sent as data and the prompt says to ignore instructions inside it. A failing provider, a
+  refusal, malformed output — all end in an honest "I could not understand".
+- **Yes and no are matched strictly.** A refusal must be made *only* of refusal words and filler
+  (`nahi`, `that's wrong`, `ye sahi nahi hai`). It runs before the model and discards a pending entry, so a
+  sentence that merely contains one — "cancel my last entry", "kuch samajh nahi aaya" — goes to the model.
 - **Audit:** every message records its intent and the actions it caused in `messages.intent` /
   `actions_json`.
-- **Cost:** roughly ₹0.03 per message on Haiku, so about ₹10 per rider per month. **Every message needs a
-  round-trip** — there is no free offline path.
+- **Cost:** about 1,600 input and 85 output tokens per message across both calls, of which roughly 1,500
+  is the fixed prefix. That is on the order of **₹5 per active rider per month** at 10 messages a day on
+  either Claude Haiku or Sarvam's reported rates — so choose a provider by how well it understands
+  Hinglish, not by price. The Sarvam rates are unconfirmed (see below). **Every message needs a
+  round-trip**: there is no free offline path.
 
 ## Languages
 
@@ -207,6 +257,7 @@ and `warnings` explains why.
 ```bash
 uv run python scripts/chat_cli.py --debug --fresh   # full conversation; --voice saves data/last_reply.wav
 uv run python scripts/process_cli.py note1.ogg      # one message through the pipeline, as JSON
+uv run python scripts/check_llm.py                  # smoke-test each model provider in BRAIN, live
 uv run python scripts/transcribe_cli.py note1.ogg   # audio → transcript, language, confidence
 uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN
 ```
@@ -238,27 +289,33 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 |---|---|
 | **Speech-to-text** | `STT_PROVIDER` (`mock`/`sarvam`/`faster_whisper`), `STT_FALLBACK`, `STT_MIN_CONFIDENCE`, `SARVAM_API_KEY`, `SARVAM_MODEL`, `SARVAM_LANGUAGE_CODE`, `SARVAM_MODE`, `WHISPER_MODEL` |
 | **Voice replies** | `TTS_PROVIDER` (`mock`/`sarvam`), `SARVAM_TTS_MODEL`, `SARVAM_TTS_SPEAKER`, `VOICE_MAX_CHARS` |
-| **The model** | `BRAIN` (`none`/`anthropic`), `ANTHROPIC_API_KEY`, `BRAIN_MODEL`, `BRAIN_RENDER_MODEL`, `BRAIN_MAX_ACTIONS` |
+| **The model** | `BRAIN` (a provider, or a comma-separated chain), `BRAIN_MAX_ACTIONS`, `BRAIN_MODEL`, `BRAIN_MODEL_<NAME>`, `BRAIN_BASE_URL_<NAME>`, `ANTHROPIC_API_KEY`; for `openai_compat`: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH` |
 | **Audio** | `MAX_AUDIO_SECONDS`, `SILENCE_RMS_THRESHOLD`, `FFMPEG_BIN` |
 | **App** | `DB_PATH`, `LOG_LEVEL` |
 
 ffmpeg ships with the install (`imageio-ffmpeg`), so no system install is needed; `FFMPEG_BIN` overrides it.
-Optional extras: `uv sync --extra llm` (Claude) and `uv sync --extra whisper` (offline speech-to-text).
+Optional extras: `uv sync --extra llm` (the Claude SDK, only needed for `anthropic`) and `uv sync --extra whisper` (offline speech-to-text).
 
 ## What is and isn't verified
 
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 258 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+**Covered by the 441 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
 action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, and
 the model-facing code against fake clients — including output that invents numbers or tries to act for
 another rider.
 
 **Not verified — no live call has ever been made:**
 
-- **The Claude API.** The request shape is checked against the installed SDK (2.13.0), nothing more.
-  Nothing here has ever spoken to a model.
+- **Any model provider.** Nothing here has ever spoken to a model. The Claude request shape is checked against
+  the installed SDK (2.13.0); the Sarvam chat API's endpoint (`/v1/chat/completions`), auth header
+  (`api-subscription-key`), model (`sarvam-105b`; `sarvam-m` is deprecated) and stringified tool-call
+  arguments come from its docs as surfaced by search, which could not be opened directly. Its price is
+  reported inconsistently (₹10/₹25 or ₹15/₹60 per million tokens) and `parallel_tool_calls: false` is
+  reported as *not* enforced on `sarvam-105b`. **Run `scripts/check_llm.py` first.**
+- **How well any model reads Hinglish and picks among seven tools.** The adapters are tested; the models are
+  not. That needs the evaluation set below.
 - **Sarvam text-to-speech.** Whether the language field is `target_language_code` or `language_code` is
   unconfirmed, so the code retries with the other name; speaker names for a newer Bulbul than v2 are
   unchecked; and nobody has heard how it reads `₹1,400` aloud.
@@ -286,10 +343,11 @@ app/
   api/routes.py        /process, /speak, /health
   audio/               ffmpeg clean-up, validation, voice-note encoding
   stt/                 interface + sarvam, whisper_local, mock
+  llm/                 the provider interface; anthropic, openai_compat (+ presets), fallback chain
   text/                numbers (spoken amounts → digits), normalize, chunk
   tts/                 service + sarvam, mock
   core/
-    brain.py           the two model calls, their guards, and the routing
+    brain.py           the two model calls (provider-agnostic), their guards, and the routing
     registry.py        ActionSpec, Registry, Context, schema validation
     actions.py         the seven action handlers + build_registry()
     tools.py           all database reads and writes; every number shown comes from here
@@ -297,8 +355,8 @@ app/
     db.py              schema + versioned migrations
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
-scripts/               chat_cli, process_cli, transcribe_cli, speak_cli
-tests/                 258 tests; tests/data/sentences.json holds the 75 sample sentences
+scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm
+tests/                 441 tests; tests/data/sentences.json holds the 75 sample sentences
 ```
 
 ## History

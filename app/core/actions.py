@@ -1,7 +1,6 @@
 """Action handlers, and the registry that exposes them. Logic only; app/core/brain.py routes to them.
 
 Every number shown to the user is computed here with tools.* (SQL/code), never by a model."""
-import re
 from datetime import date
 
 from . import dates, replies, tools, validate
@@ -245,7 +244,7 @@ _ENTRY = {
     "type": "object",
     "properties": {
         "type": {"type": ["string", "null"], "enum": ["income", "expense", "saving", None],
-                 "description": "null when the user did not say whether it was income or an expense"},
+                 "description": "Omit when the rider did not say whether it was income or an expense"},
         "amount": {"type": "number", "description": "Rupees, between 1 and 50000"},
         "category": {"type": ["string", "null"], "enum": CATEGORIES + [None]},
         "platform": {"type": ["string", "null"], "enum": PLATFORMS + [None]},

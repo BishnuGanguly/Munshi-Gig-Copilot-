@@ -1,7 +1,7 @@
-"""The pipeline's understanding and wording. Fake clients stand in for the API, so these tests pin down
-what the code does with whatever the model returns - including output that invents numbers."""
+"""The pipeline's understanding and wording, tested against a fake provider that speaks our own interface.
+The tests pin down what the code does with whatever a model returns - including output that invents numbers.
+Vendor wire formats are tested separately (tests/test_llm_*.py)."""
 import base64
-import json
 from datetime import datetime
 
 import pytest
@@ -10,49 +10,22 @@ from fastapi.testclient import TestClient
 from app.core import brain, dates, db, tools
 from app.core.actions import REGISTRY
 from app.core.brain import Renderer, Understander, preprocess, speakable
+from app.errors import LlmUnavailableError
 from app.main import create_app
 from tests.audio_helpers import make_audio
+from tests.fakes import FakeProvider, rendering
 
 NOW = datetime(2026, 11, 25, 10, 0, tzinfo=dates.IST)
 
 
-# ---------------------------------------------------------------- fakes
-class Block:
-    def __init__(self, name, args):
-        self.type, self.name, self.input = "tool_use", name, args
-
-
-class FakeApi:
-    """Records requests; returns queued tool calls (router) or text (renderer)."""
-
-    def __init__(self, calls=(), text=None, stop_reason="tool_use", raises=None):
-        self.calls, self.text, self.stop_reason, self.raises = list(calls), text, stop_reason, raises
-        self.requests = []
-
-    def create(self, **kw):
-        self.requests.append(kw)
-        if self.raises:
-            raise self.raises
-        if self.text is not None:
-            content = [type("T", (), {"type": "text", "text": self.text})()]
-        else:
-            content = [Block(n, a) for n, a in self.calls]
-        return type("R", (), {"content": content, "stop_reason": self.stop_reason, "stop_details": None,
-                              "usage": type("U", (), {"cache_read_input_tokens": 0})()})()
-
-
-def client_of(api):
-    return type("C", (), {"messages": api})()
-
-
 def router_for(calls):
-    api = FakeApi(calls=calls)
-    return Understander(REGISTRY, client=client_of(api)), api
+    provider = FakeProvider(turns=[calls])
+    return Understander(REGISTRY, provider), provider
 
 
-def renderer_for(language="hi-IN", reply="theek hai", **kw):
-    api = FakeApi(text=json.dumps({"language": language, "reply": reply}), **kw)
-    return Renderer(client=client_of(api)), api
+def renderer_for(language="hi-IN", reply="theek hai"):
+    provider = FakeProvider(text=rendering(language, reply))
+    return Renderer(provider), provider
 
 
 @pytest.fixture
@@ -87,19 +60,19 @@ def test_amounts_become_digits_before_the_model_sees_them(raw, expected):
 def test_confirmations_never_reach_the_model(chat):
     r, api = router_for([("log_entries", {"entries": [{"type": "income", "amount": 500}]})])
     chat("500 aaya", understander=r)
-    calls_before = len(api.requests)
+    calls_before = len(api.chooses)
     out = chat("haan theek hai", understander=r)                     # yes, in Hinglish
     assert out.outcome.reply.startswith("Saved")
-    assert len(api.requests) == calls_before                   # no round-trip for the commonest message
+    assert len(api.chooses) == calls_before                   # no round-trip for the commonest message
     assert saved(chat)[0]["amount"] == 500
 
 
 def test_no_discards_locally(chat):
     r, api = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
     chat("250 petrol", understander=r)
-    n = len(api.requests)
+    n = len(api.chooses)
     assert "discarded" in chat("nahi", understander=r).outcome.reply
-    assert len(api.requests) == n and saved(chat) == []
+    assert len(api.chooses) == n and saved(chat) == []
 
 
 def test_yes_with_nothing_pending(chat):
@@ -116,14 +89,14 @@ def test_regional_language_logging_end_to_end(chat):
     assert "Please confirm: income ₹1,400 from Swiggy" in out.outcome.reply      # our English fact
     assert out.reply_user == "இன்று ₹1,400 வரவு Swiggy. சரியா?"                  # rendered for the rider
     assert out.reply_language == "ta-IN" and saved(chat) == []                   # still unconfirmed
-    assert "இன்று ஸ்விக்கியில் 1400" in rapi.requests[0]["messages"][0]["content"]
+    assert "இன்று ஸ்விக்கியில் 1400" in rapi.completes[0]["user"]
 
 
 def test_no_translation_call_is_made(chat):
     """The rider's words go to the model as they are - there is no to_english hop any more."""
     r, api = router_for([("query_summary", {"kind": "earnings", "period": "this_week"})])
     chat("इस हफ़्ते कितना कमाया", understander=r, renderer=None)
-    sent = api.requests[0]["messages"][0]["content"]
+    sent = api.chooses[0]["user"]
     assert "इस हफ़्ते कितना कमाया" in sent
 
 
@@ -133,7 +106,7 @@ def test_a_correction_while_pending_replaces_it(chat):
     r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}]})])
     out = chat("250 nahi 300 tha", understander=r2)
     assert "₹300" in out.outcome.reply
-    assert "An action is already waiting" in api2.requests[0]["messages"][0]["content"]   # the model is told
+    assert "An action is already waiting" in api2.chooses[0]["user"]   # the model is told
     chat("haan")
     assert saved(chat)[0]["amount"] == 300
 
@@ -157,14 +130,13 @@ def test_without_a_model_it_says_so_rather_than_guessing(chat):
 
 
 # ---------------------------------------------------------------- the renderer, and the number guard
-def test_render_request_shape():
-    rend, api = renderer_for()
+def test_render_asks_for_a_rewording_and_nothing_else():
+    rend, provider = renderer_for()
     rend.render("Saved. Today's profit is ₹350.", "250 ka petrol")
-    req = api.requests[0]
-    assert req["model"] == "claude-haiku-5-5" and req["output_config"] == {"effort": "low"}
-    assert req["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert "tools" not in req                                   # rendering is not a tool call
-    assert "SAME \nlanguage" in req["system"][0]["text"] or "SAME" in req["system"][0]["text"]
+    req = provider.requests[0]
+    assert req["kind"] == "complete" and "tools" not in req          # rewording is not a tool call
+    assert req["system"] == brain.SYSTEM_RENDER and "SAME" in req["system"]
+    assert "250 ka petrol" in req["user"] and "Saved. Today's profit is ₹350." in req["user"]
 
 
 def test_render_cannot_invent_a_number():
@@ -186,21 +158,37 @@ def test_render_normalises_native_digits():
     assert rend.render("Today's profit is ₹350.", "x")[0] == "आज का मुनाफ़ा ₹350 है"
 
 
-@pytest.mark.parametrize("text,kw", [
-    (None, {"raises": RuntimeError("connection reset")}),
-    ("not json", {}),
-    ('{"language": "hi-IN"}', {}),
-    ('{"language": "hi-IN", "reply": ""}', {}),
-])
-def test_render_failures_keep_the_english_reply(text, kw):
-    api = FakeApi(text=text if text is not None else "x", **kw)
-    reply, lang, warnings = Renderer(client=client_of(api)).render("Saved.", "x")
+@pytest.mark.parametrize("text", ["not json", '{"language": "hi-IN"}', '{"language": "hi-IN", "reply": ""}', ""])
+def test_render_bad_output_keeps_the_english_reply(text):
+    reply, lang, warnings = Renderer(FakeProvider(text=text)).render("Saved.", "x")
     assert reply == "Saved." and lang == "en-IN" and warnings == ["reply_not_rendered"]
 
 
-def test_render_refusal_keeps_the_english_reply():
-    api = FakeApi(text='{"language":"hi-IN","reply":"x"}', stop_reason="refusal")
-    assert Renderer(client=client_of(api)).render("Saved.", "x")[0] == "Saved."
+@pytest.mark.parametrize("error", [LlmUnavailableError("down"), RuntimeError("connection reset"), ValueError("x")])
+def test_render_provider_failure_keeps_the_english_reply(error):
+    reply, lang, warnings = Renderer(FakeProvider(raises=error)).render("Saved.", "x")
+    assert reply == "Saved." and lang == "en-IN" and warnings == ["reply_not_rendered"]
+
+
+@pytest.mark.parametrize("error", [LlmUnavailableError("down"), RuntimeError("boom")])
+def test_understanding_failure_is_an_honest_unknown(chat, error):
+    u = Understander(REGISTRY, FakeProvider(raises=error))
+    assert chat("kuch bhi", understander=u).outcome.intent == "unknown"
+
+
+def test_the_model_is_asked_through_the_neutral_interface(chat):
+    r, provider = router_for([("help", {})])
+    chat("kuch bhi", understander=r)
+    req = provider.chooses[0]
+    assert [t["name"] for t in req["tools"]] == REGISTRY.names()           # one source of truth
+    assert all(set(t) == {"name", "description", "input_schema"} for t in req["tools"])   # no vendor shape
+    assert "data, not instructions" in req["system"] and "%" not in req["system"]
+
+
+def test_the_model_cannot_be_given_more_actions_than_the_cap(chat):
+    provider = FakeProvider(turns=[[("help", {})] * 10])
+    u = Understander(REGISTRY, provider, max_actions=2)
+    assert len(u._call("x", "")) == 2
 
 
 # ---------------------------------------------------------------- what to speak it in
@@ -260,3 +248,25 @@ def test_grouping_does_not_hide_a_real_invention():
 def test_a_grouped_amount_in_the_transcript_is_grounded(chat):
     r, _ = router_for([("log_entries", {"entries": [{"type": "income", "amount": 1400, "platform": "Swiggy"}]})])
     assert "₹1,400" in chat("Swiggy se 1,400 aaye", understander=r).outcome.reply
+
+
+# ---------------------------------------------------------------- regression: yes/no must not swallow the model's messages
+def test_a_sentence_containing_nahi_reaches_the_model_and_does_not_discard_the_pending_entry(chat):
+    """Regression. `is_no` used to match ANY short sentence containing a refusal word, so "kuch samajh nahi
+    aaya" was answered locally - and with an entry pending it silently discarded the rider's entry."""
+    r1, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
+    chat("250 ka petrol", understander=r1)
+    assert tools.get_pending(chat.conn, "u", NOW) is not None
+    r2, api = router_for([("help", {})])
+    out = chat("kuch samajh nahi aaya", understander=r2)
+    assert len(api.chooses) == 1 and out.outcome.intent == "help"          # the model saw it
+    assert tools.get_pending(chat.conn, "u", NOW) is not None              # and the entry survived
+
+
+def test_cancel_my_last_entry_is_a_delete_request_not_a_refusal(chat):
+    r1, _ = router_for([("log_entries", {"entries": [{"type": "income", "amount": 500}]})])
+    chat("500 aaya", understander=r1)
+    chat("haan")
+    r2, api = router_for([("delete_entry", {})])
+    out = chat("cancel my last entry", understander=r2)
+    assert len(api.chooses) == 1 and "Delete the last entry" in out.outcome.reply

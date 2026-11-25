@@ -48,6 +48,9 @@ YES_FILLER = {"it", "is", "that", "thats", "that's", "the", "hai", "please", "th
               "ahead", "and"}
 NO_WORDS = {"no", "nope", "wrong", "incorrect", "cancel", "discard", "nahi", "nahin", "galat", "stop", "not",
             "👎", "✗"}
+# Words that may sit beside a refusal without changing it: "that is wrong", "ye sahi nahi hai", "not correct".
+NO_FILLER = {"it", "is", "that", "thats", "that's", "this", "the", "hai", "ho", "please", "ji", "ye", "yeh", "bilkul",
+             "sahi", "theek", "thik", "correct", "right", "and"}
 
 _TOKENS = re.compile(r"[\w👍👎✓✔✗']+")
 
@@ -67,10 +70,16 @@ def is_yes(text: str) -> bool:
 
 
 def is_no(text: str) -> bool:
-    """A bare refusal. 'no, it was income' is not one: it carries a correction for the model to read."""
+    """A bare refusal: nothing but refusal words and filler, like is_yes.
+
+    This must be strict. It runs before the model and, when something is pending, DISCARDS it, so a phrase
+    that merely contains a refusal word must not match: "cancel my last entry" is a delete request, "wrong
+    platform" is a correction, "kuch samajh nahi aaya" is "I did not understand". All of those belong to the
+    model.
+    """
     toks = _tokens(text)
     if not toks or any(c.isdigit() for c in text) or len(toks) > 6:
         return False
     if not any(t in NO_WORDS for t in toks):
         return False
-    return not re.search(r"\b(income|earning|earnings|earned|expense|expenses|spent|saving|savings)\b", text, re.I)
+    return all(t in NO_WORDS | NO_FILLER for t in toks)

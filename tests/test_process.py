@@ -4,7 +4,6 @@ This is the whole path: ffmpeg -> speech-to-text -> digits -> the model picks an
 -> the model rewords the reply -> a voice note.
 """
 import base64
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,32 +12,10 @@ from app.core import brain
 from app.core.actions import REGISTRY
 from app.main import create_app
 from tests.audio_helpers import make_audio, silent_audio
+from tests.fakes import FakeProvider, rendering
 
 KEYS = {"transcript", "detected_language", "normalized_text", "entries", "reply_english",
         "reply_user_language", "warnings", "intent", "reply_audio_mime", "reply_audio_base64"}
-
-
-class Block:
-    def __init__(self, name, args):
-        self.type, self.name, self.input = "tool_use", name, args
-
-
-class FakeApi:
-    """`turns` is a list of tool-call lists, one per request; the last one repeats."""
-
-    def __init__(self, turns=(), text=None):
-        self.turns, self.text = list(turns), text
-        self.requests = []
-
-    def create(self, **kw):
-        self.requests.append(kw)
-        if self.text is not None:
-            content = [type("T", (), {"type": "text", "text": self.text})()]
-        else:
-            calls = self.turns[min(len(self.requests) - 1, len(self.turns) - 1)] if self.turns else []
-            content = [Block(n, a) for n, a in calls]
-        return type("R", (), {"content": content, "stop_reason": "tool_use", "stop_details": None,
-                              "usage": type("U", (), {"cache_read_input_tokens": 0})()})()
 
 
 @pytest.fixture
@@ -48,16 +25,13 @@ def client():
 
 @pytest.fixture
 def with_model(monkeypatch):
-    """Install a fake understander and renderer, as if BRAIN=anthropic were configured."""
+    """Install a fake provider, as if BRAIN=... were configured. `turns` is one tool-call list per request."""
     def install(turns, rendered=None, language="hi-IN"):
-        api = FakeApi(turns=turns)
-        monkeypatch.setattr(brain, "get_understander",
-                            lambda: brain.Understander(REGISTRY, client=type("C", (), {"messages": api})()))
+        provider = FakeProvider(turns=turns, text=rendering(language, rendered) if rendered is not None else "")
+        monkeypatch.setattr(brain, "get_understander", lambda: brain.Understander(REGISTRY, provider))
         if rendered is not None:
-            rapi = FakeApi(text=json.dumps({"language": language, "reply": rendered}))
-            monkeypatch.setattr(brain, "get_renderer",
-                                lambda: brain.Renderer(client=type("C", (), {"messages": rapi})()))
-        return api
+            monkeypatch.setattr(brain, "get_renderer", lambda: brain.Renderer(provider))
+        return provider
     return install
 
 
@@ -120,12 +94,12 @@ def test_voice_note_to_confirmed_entry(client, with_model):
     assert all(e["status"] == "pending_confirmation" for e in r["entries"])
     assert "Please confirm" in r["reply_english"]
     assert base64.b64decode(r["reply_audio_base64"])[:4] == b"OggS"
-    assert "aaj Swiggy se 1400" in api.requests[0]["messages"][0]["content"]   # the rider's own words
+    assert "aaj Swiggy se 1400" in api.chooses[0]["user"]   # the rider's own words
 
-    n = len(api.requests)
+    n = len(api.chooses)
     r2 = client.post("/process", data={"user_id": "e2e", "text": "haan"}).json()
     assert r2["reply_english"] == "Saved. Today's profit is ₹1,150."
-    assert len(api.requests) == n                                             # confirmations stay local
+    assert len(api.chooses) == n                                             # confirmations stay local
 
     r3 = client.post("/process", data={"user_id": "e2e", "text": "aaj kitna kamaya"}).json()
     assert r3["reply_english"].startswith("Today you earned ₹1,400")
