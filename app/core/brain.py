@@ -1,17 +1,22 @@
-"""The LLM-first pipeline: Sarvam speech-to-text -> the model understands -> our code executes -> the model
-renders the reply in the rider's own language -> Sarvam text-to-speech.
+"""The pipeline's understanding and wording: Sarvam speech-to-text -> the model picks an action -> our code
+executes it -> the model renders the reply in the rider's own language -> Sarvam text-to-speech.
 
-No translation chain, no language detection, no cue-word regexes. Selected with `PIPELINE=llm`.
+There is no translation chain, no language detection and no cue-word regexes. The model reads the rider's
+words as they were spoken, in any Indian language, and only ever chooses an action from the registry.
 
 What is deliberately NOT given to the model:
-  * **Amounts in words.** `numbers.py` turns `दो सौ पचास` / `dhai sau` into `250` first. That is arithmetic,
-    not understanding: it is deterministic, free, and it lets the number guard work at all (the guard checks
-    the model's numbers against the rider's text, so the text must carry digits).
-  * **Yes and no.** The most frequent message in the app is a confirmation. It is answered locally in a few
-    lines, with no round-trip and no way for a model to get it wrong.
+  * **Amounts in words.** `app/text/numbers.py` turns `दो सौ पचास` / `dhai sau` into `250` first. That is
+    arithmetic, not understanding: it is deterministic, free, and it is what lets the number guard work at
+    all (the guard checks the model's figures against the rider's text, so the text must carry digits).
+  * **Yes and no.** The commonest message in the app is a confirmation. It is answered locally, with no
+    round-trip and no way for a model to get it wrong.
   * **Any number the rider is told.** Every figure in a reply is computed in SQL by `tools.py`. The model
-    only *renders* our English sentence into the rider's language, and a guard rejects the rendering if it
-    contains a number our sentence did not.
+    only *rewords* our English sentence into the rider's language, and a guard rejects the rewording if it
+    contains a number our sentence did not state.
+
+Everything the model returns is untrusted: arguments are schema-validated by the registry, `user_id` is
+never an argument, write actions only propose and the rider confirms, and the message itself is sent as
+data with the prompt saying to ignore instructions inside it.
 """
 import json
 import logging
@@ -19,22 +24,22 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from . import db, parser, replies, tools
+from app.text import normalize, normalize_digits
+from . import db, replies, tools, validate
 from .actions import REGISTRY
 from .dates import now_ist
-from .llm_router import LlmRouter, build_context, numbers_in
-from .registry import Context, Outcome
-from ..translate.numbers import normalize_digits, words_to_digits
+from .registry import ActionError, Context, Outcome, Registry
 
 log = logging.getLogger("munshi.brain")
 
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_LANGUAGE = "en-IN"
+MAX_ACTIONS = int(os.getenv("BRAIN_MAX_ACTIONS", "3"))
 
 # Languages Sarvam's voice can speak. A reply in anything else is still shown, but spoken in English.
 SPEAKABLE = {"en-IN", "hi-IN", "bn-IN", "gu-IN", "kn-IN", "ml-IN", "mr-IN", "od-IN", "pa-IN", "ta-IN", "te-IN"}
 
-# Static, so the prefix caches. Unlike the rules pipeline, the message arrives in the rider's OWN language.
+# Static, so the prefix caches: no dates and no rider data.
 SYSTEM_UNDERSTAND = """You route messages for Munshi, a bookkeeping assistant used by Indian delivery and \
 ride-hailing riders (Swiggy, Zomato, Uber, Ola, Rapido, Blinkit, Zepto).
 
@@ -74,37 +79,144 @@ Reply with JSON only: {"language": "<BCP-47 code such as hi-IN, en-IN, ta-IN, or
 "reply": "<the rewritten reply>"}"""
 
 
-@dataclass
-class BrainResult:
-    outcome: Outcome
-    reply_user: str                         # the reply in the rider's language (English if rendering failed)
-    reply_language: str = DEFAULT_LANGUAGE  # BCP-47; what to speak it in
-    normalized_text: str = ""
-    warnings: list = field(default_factory=list)
+# ------------------------------------------------------------------ number guards
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+_GROUPING = re.compile(r"(?<=\d),(?=\d)")
 
 
-def preprocess(text: str) -> str:
-    """Digits of any script -> 0-9, then spoken amounts -> digits. Nothing else is touched."""
-    return re.sub(r"\s+", " ", words_to_digits(normalize_digits(text))).strip()
+def numbers_in(value) -> list[str]:
+    """Every number inside a structure, as plain strings ('250', '1500.5').
+
+    Thousands separators are removed first, so `1,400` and `1400` are the same number. Without this the
+    guards would reject a correct rendering whenever the model grouped digits differently from us.
+    """
+    out: list[str] = []
+    if isinstance(value, bool):
+        return out
+    if isinstance(value, (int, float)):
+        out.append(f"{value:g}")
+    elif isinstance(value, str):
+        out += [m.group() for m in _NUM.finditer(_GROUPING.sub("", value))]
+    elif isinstance(value, dict):
+        for v in value.values():
+            out += numbers_in(v)
+    elif isinstance(value, list):
+        for v in value:
+            out += numbers_in(v)
+    return out
 
 
-def speakable(language: str) -> str:
-    """The code to hand Sarvam's voice: Hinglish is spoken by the Hindi voice; unknown languages in English."""
-    if language == "hi-Latn":
-        return "hi-IN"
-    return language if language in SPEAKABLE else DEFAULT_LANGUAGE
+def _as_float(text: str) -> float | None:
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def ungrounded_numbers(args: dict, text: str) -> list[str]:
+    """Numbers in `args` that the rider did not say (dates are exempt: our code sets those)."""
+    checked = {k: v for k, v in args.items() if k != "date"}
+    if isinstance(checked.get("entries"), list):
+        checked["entries"] = [{k: v for k, v in e.items() if k != "date"} if isinstance(e, dict) else e
+                              for e in checked["entries"]]
+    said = numbers_in(text)
+    said_floats = [f for f in (_as_float(n) for n in said) if f is not None]
+    missing = []
+    for n in numbers_in(checked):
+        if n in said:
+            continue
+        f = _as_float(n)
+        if f is not None and any(abs(f - s) < 0.005 for s in said_floats):
+            continue
+        missing.append(n)
+    return missing
+
+
+def build_context(ctx: Context, pending: dict | None, turns: list[dict], target: float | None) -> str:
+    """What the model needs besides the message itself. No rider identity, no secrets."""
+    lines = [f"Today is {ctx.today.isoformat()}."]
+    if target is not None:
+        lines.append(f"The rider's daily income target is {target:g} rupees.")
+    if pending:
+        lines.append(f"An action is already waiting for the rider's yes or no: {pending.get('action')}.")
+    for t in turns[-4:]:
+        if t.get("english_text"):
+            lines.append(f"Earlier - rider: {t['english_text']}")
+        if t.get("reply_english"):
+            lines.append(f"Earlier - assistant: {t['reply_english']}")
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ the two model calls
+class Understander:
+    """Chooses registry actions for a message. `client` is injectable for tests."""
+
+    def __init__(self, registry: Registry, client=None, model: str | None = None,
+                 max_actions: int = MAX_ACTIONS, system: str | None = None) -> None:
+        self.registry = registry
+        self.system = system or SYSTEM_UNDERSTAND
+        self.model = model or os.getenv("BRAIN_MODEL") or DEFAULT_MODEL
+        self.max_actions = max_actions
+        self._client = client
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic  # ImportError is caught by the caller
+            self._client = anthropic.Anthropic()
+        return self._client
+
+    def _call(self, text: str, context: str) -> list[tuple[str, dict]]:
+        response = self._get_client().messages.create(
+            model=self.model,
+            max_tokens=1024,
+            output_config={"effort": "low"},                   # a router: speed over deliberation
+            system=[{"type": "text", "text": self.system % self.max_actions,
+                     "cache_control": {"type": "ephemeral"}}],  # static prefix, so it caches
+            tools=self.registry.tool_definitions(),
+            tool_choice={"type": "auto"},
+            messages=[{"role": "user", "content": f"{context}\n\nThe rider says: {text}"}],
+        )
+        if getattr(response, "stop_reason", None) == "refusal":
+            log.warning("understanding refused: %s", getattr(response, "stop_details", None))
+            return []
+        calls = [(b.name, b.input) for b in response.content if getattr(b, "type", "") == "tool_use"]
+        usage = getattr(response, "usage", None)
+        log.info("understand model=%s calls=%s cache_read=%s", self.model, [c[0] for c in calls],
+                 getattr(usage, "cache_read_input_tokens", None))
+        return calls[: self.max_actions]
+
+    def understand(self, ctx: Context, text: str, context: str) -> Outcome | None:
+        """Execute the first usable action the model chose, or None if it gave us nothing we can trust."""
+        try:
+            calls = self._call(text, context)
+        except Exception as exc:               # network, auth, missing package, bad response shape
+            log.warning("understanding failed: %s: %s", type(exc).__name__, exc)
+            return None
+        for name, args in calls:
+            if not isinstance(args, dict):
+                log.warning("non-object arguments for %s", name)
+                continue
+            missing = ungrounded_numbers(args, text)
+            if missing:
+                log.warning("dropped %s: numbers the rider did not say: %s", name, missing)
+                continue
+            try:
+                return self.registry.execute(name, args, ctx)
+            except ActionError as exc:
+                log.warning("invalid call from the model: %s", exc)
+        return None
 
 
 class Renderer:
     """Turns our English reply into the rider's language. Never raises: on any failure the English stands."""
 
     def __init__(self, client=None, model: str | None = None) -> None:
-        self.model = model or os.getenv("BRAIN_RENDER_MODEL", DEFAULT_MODEL)
+        self.model = model or os.getenv("BRAIN_RENDER_MODEL") or DEFAULT_MODEL
         self._client = client
 
     def _get_client(self):
         if self._client is None:
-            import anthropic  # ImportError is handled by the caller
+            import anthropic
             self._client = anthropic.Anthropic()
         return self._client
 
@@ -136,28 +248,51 @@ class Renderer:
             return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
         if not reply:
             return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        # The guard: the rendering may not introduce a number our own sentence did not state.
+        # The guard: a rewording may not introduce a number our own sentence did not state.
         ours = numbers_in(normalize_digits(english))
-        theirs = numbers_in(normalize_digits(reply))
-        extra = [n for n in theirs if n not in ours]
+        extra = [n for n in numbers_in(normalize_digits(reply)) if n not in ours]
         if extra:
             log.warning("render invented numbers %s; keeping the English reply", extra)
             return english, DEFAULT_LANGUAGE, [f"reply_numbers_invented: {', '.join(extra)}"]
         return normalize_digits(reply), language, []
 
 
+# ------------------------------------------------------------------ wiring
+def enabled() -> bool:
+    return os.getenv("BRAIN", "none") == "anthropic"
+
+
+def get_understander() -> Understander | None:
+    return Understander(REGISTRY) if enabled() else None
+
+
 def get_renderer() -> Renderer | None:
-    return Renderer() if os.getenv("BRAIN", "none") == "anthropic" else None
+    return Renderer() if enabled() else None
 
 
-def get_router() -> LlmRouter | None:
-    if os.getenv("BRAIN", "none") != "anthropic":
-        return None
-    return LlmRouter(REGISTRY, model=os.getenv("BRAIN_MODEL"), system=SYSTEM_UNDERSTAND)
+def preprocess(text: str) -> str:
+    """Digits of any script -> 0-9, spoken amounts -> digits, platform spellings -> canonical."""
+    return normalize(text)
 
 
-def handle(conn, user_id: str, text: str, now=None, router=None, renderer=None) -> BrainResult:
-    """One message in, one reply out - the LLM-first path."""
+def speakable(language: str) -> str:
+    """The code to hand Sarvam's voice: Hinglish is spoken by the Hindi voice; unknown languages in English."""
+    if language == "hi-Latn":
+        return "hi-IN"
+    return language if language in SPEAKABLE else DEFAULT_LANGUAGE
+
+
+@dataclass
+class BrainResult:
+    outcome: Outcome
+    reply_user: str                         # the reply in the rider's language (English if rendering failed)
+    reply_language: str = DEFAULT_LANGUAGE  # BCP-47; what to speak it in
+    normalized_text: str = ""
+    warnings: list = field(default_factory=list)
+
+
+def handle(conn, user_id: str, text: str, now=None, understander=None, renderer=None) -> BrainResult:
+    """One message in, one reply out."""
     now = now or now_ist()
     ctx = Context(conn, user_id, now)
     db.ensure_user(conn, user_id)
@@ -170,26 +305,26 @@ def handle(conn, user_id: str, text: str, now=None, router=None, renderer=None) 
 
     # 1. Confirmations, answered locally: no model call, no way to get it wrong.
     if pending:
-        if parser.is_yes(normalized):
+        if validate.is_yes(normalized):
             outcome = REGISTRY.commit(ctx, pending)
-        elif parser.is_no(normalized):
+        elif validate.is_no(normalized):
             tools.clear_pending(conn, user_id)
             outcome = Outcome("OK, discarded. Please say it again.", intent="reject")
-    elif parser.is_yes(normalized) or parser.is_no(normalized):
+    elif validate.is_yes(normalized) or validate.is_no(normalized):
         outcome = Outcome(replies.NOTHING_PENDING, intent="confirm")
 
     # 2. Everything else: the model picks an action, our code validates and runs it.
     if outcome is None:
-        router = router or get_router()
-        if router is not None:
-            target = tools.get_target(conn, user_id, ctx.today)
-            context = build_context(ctx, pending, db.recent_turns(conn, user_id), target)
-            outcome = router.route(ctx, normalized, context)
+        understander = understander or get_understander()
+        if understander is not None:
+            context = build_context(ctx, pending, db.recent_turns(conn, user_id),
+                                    tools.get_target(conn, user_id, ctx.today))
+            outcome = understander.understand(ctx, normalized, context)
         if outcome is None:
             outcome = Outcome(replies.NOT_UNDERSTOOD, intent="unknown",
-                              warnings=["understanding_unavailable"] if router is None else [])
+                              warnings=[] if understander is not None else ["understanding_unavailable"])
 
-    # 3. The reply: our English sentence, rendered into the rider's language. Numbers come from step 2.
+    # 3. The reply: our English sentence, reworded into the rider's language. Figures come from step 2.
     reply_user, language = outcome.reply, DEFAULT_LANGUAGE
     renderer = renderer or get_renderer()
     if renderer is not None:

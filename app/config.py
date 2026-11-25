@@ -10,7 +10,6 @@ except ImportError:
 
 class Settings:
     def __init__(self) -> None:
-        self.translate_provider = os.getenv("TRANSLATE_PROVIDER", "mock")
         self.db_path = os.getenv("DB_PATH", "data/munshi.db")
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
 

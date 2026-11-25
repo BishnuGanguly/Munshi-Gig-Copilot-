@@ -1,76 +1,173 @@
+"""`POST /process` end to end, with a fake model standing in for the API.
+
+This is the whole path: ffmpeg -> speech-to-text -> digits -> the model picks an action -> our code runs it
+-> the model rewords the reply -> a voice note.
+"""
+import base64
+import json
+
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core import brain
+from app.core.actions import REGISTRY
 from app.main import create_app
 from tests.audio_helpers import make_audio, silent_audio
 
-KEYS = {"transcript", "detected_language", "normalized_text", "english_text", "entries", "reply_english",
+KEYS = {"transcript", "detected_language", "normalized_text", "entries", "reply_english",
         "reply_user_language", "warnings", "intent", "reply_audio_mime", "reply_audio_base64"}
 
 
+class Block:
+    def __init__(self, name, args):
+        self.type, self.name, self.input = "tool_use", name, args
+
+
+class FakeApi:
+    """`turns` is a list of tool-call lists, one per request; the last one repeats."""
+
+    def __init__(self, turns=(), text=None):
+        self.turns, self.text = list(turns), text
+        self.requests = []
+
+    def create(self, **kw):
+        self.requests.append(kw)
+        if self.text is not None:
+            content = [type("T", (), {"type": "text", "text": self.text})()]
+        else:
+            calls = self.turns[min(len(self.requests) - 1, len(self.turns) - 1)] if self.turns else []
+            content = [Block(n, a) for n, a in calls]
+        return type("R", (), {"content": content, "stop_reason": "tool_use", "stop_details": None,
+                              "usage": type("U", (), {"cache_read_input_tokens": 0})()})()
+
+
+@pytest.fixture
 def client():
     return TestClient(create_app(":memory:"))
 
 
-def test_health():
-    assert client().get("/health").json() == {"status": "ok"}
+@pytest.fixture
+def with_model(monkeypatch):
+    """Install a fake understander and renderer, as if BRAIN=anthropic were configured."""
+    def install(turns, rendered=None, language="hi-IN"):
+        api = FakeApi(turns=turns)
+        monkeypatch.setattr(brain, "get_understander",
+                            lambda: brain.Understander(REGISTRY, client=type("C", (), {"messages": api})()))
+        if rendered is not None:
+            rapi = FakeApi(text=json.dumps({"language": language, "reply": rendered}))
+            monkeypatch.setattr(brain, "get_renderer",
+                                lambda: brain.Renderer(client=type("C", (), {"messages": rapi})()))
+        return api
+    return install
 
 
-def test_process_text():
-    r = client().post("/process", data={"user_id": "u1", "text": "Swiggy se 1400 aaye"})
-    assert r.status_code == 200
-    assert set(r.json()) == KEYS
-    assert r.json()["transcript"] == "Swiggy se 1400 aaye"
+# ---------------------------------------------------------------- shape and inputs
+def test_response_shape(client):
+    r = client.post("/process", data={"user_id": "u1", "text": "Swiggy se 1400 aaye"})
+    assert r.status_code == 200 and set(r.json()) == KEYS
 
 
-def test_process_audio_uses_mock_stt():
-    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("note.ogg", make_audio("ogg"), "audio/ogg")})
-    assert r.status_code == 200
-    body = r.json()
-    assert set(body) == KEYS
-    assert body["detected_language"] == "hi-IN"
+def test_text_is_passed_through_with_amounts_as_digits(client):
+    r = client.post("/process", data={"user_id": "u1", "text": "zomato se dedh hazaar mile"}).json()
+    assert r["transcript"] == "zomato se dedh hazaar mile"
+    assert r["normalized_text"] == "Zomato se 1500 mile"      # what the model is given
 
 
-def test_requires_audio_or_text():
-    assert client().post("/process", data={"user_id": "u1"}).status_code == 400
+def test_audio_is_transcribed(client):
+    r = client.post("/process", data={"user_id": "u1"},
+                    files={"audio": ("note.ogg", make_audio("ogg"), "audio/ogg")}).json()
+    assert r["transcript"] == "aaj swiggy se 1400 aaye aur petrol 250 ka dala"
+    assert r["detected_language"] == "hi-IN"                   # reported by speech-to-text
 
 
-def test_empty_audio_rejected():
-    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("n.ogg", b"", "audio/ogg")})
-    assert r.status_code == 400
+@pytest.mark.parametrize("data,files,detail", [
+    ({"user_id": "u1"}, None, "either an audio file or non-empty text"),
+    ({"user_id": "u1"}, {"audio": ("n.ogg", b"", "audio/ogg")}, "Empty audio"),
+    ({"user_id": "u1", "text": "hi", "voice": "loud"}, None, "voice must be one of"),
+])
+def test_bad_input_is_400(client, data, files, detail):
+    r = client.post("/process", data=data, files=files)
+    assert r.status_code == 400 and detail in r.json()["detail"]
 
 
-def test_language_remembered_for_digit_only_text():
-    c = client()
-    c.post("/process", data={"user_id": "u2"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")})
-    r = c.post("/process", data={"user_id": "u2", "text": "1400"})
-    assert r.json()["detected_language"] == "hi-IN"  # no script clue, so the user's last language is used
+def test_silent_audio_is_rejected_before_any_model_call(client):
+    r = client.post("/process", data={"user_id": "u1"}, files={"audio": ("n.wav", silent_audio(), "audio/wav")})
+    assert r.status_code == 400 and ("silent" in r.json()["detail"].lower()
+                                     or "speech" in r.json()["detail"].lower())
 
 
-def test_romanised_hindi_text_is_detected_as_hinglish():
-    r = client().post("/process", data={"user_id": "u3", "text": "aaj swiggy se 1400 aaye"})
-    assert r.json()["detected_language"] == "hi-Latn"
-    assert "1400" in r.json()["normalized_text"]
+def test_without_a_model_it_says_so_rather_than_guessing(client):
+    r = client.post("/process", data={"user_id": "u1", "text": "Got 1400 from Swiggy"}).json()
+    assert r["intent"] == "unknown" and "understanding_unavailable" in r["warnings"]
+    assert r["entries"] == []
 
 
-def test_spoken_amount_words_become_digits_in_the_pipeline():
-    r = client().post("/process", data={"user_id": "u4", "text": "आज मैं दो सौ पचास रुपए का बचत किया।"})
-    assert r.json()["detected_language"] == "hi-IN"
-    assert "250" in r.json()["normalized_text"]
+# ---------------------------------------------------------------- the full path, with a fake model
+def test_voice_note_to_confirmed_entry(client, with_model):
+    """Speech-to-text hears Hinglish; the model logs two entries; 'haan' saves them without a model call."""
+    api = with_model([
+        # request 1: the voice note -> two entries. request 2 is "haan" (never reaches the model).
+        [("log_entries", {"entries": [{"type": "income", "amount": 1400, "platform": "Swiggy"},
+                                      {"type": "expense", "amount": 250, "category": "fuel"}]})],
+        # request 2 (the model's second call): the question
+        [("query_summary", {"kind": "earnings", "period": "today"})],
+    ])
 
+    r = client.post("/process", data={"user_id": "e2e"},
+                    files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
+    assert [(e["type"], e["amount"], e["platform"]) for e in r["entries"]] == [
+        ("income", 1400, "Swiggy"), ("expense", 250, None)]
+    assert all(e["status"] == "pending_confirmation" for e in r["entries"])
+    assert "Please confirm" in r["reply_english"]
+    assert base64.b64decode(r["reply_audio_base64"])[:4] == b"OggS"
+    assert "aaj Swiggy se 1400" in api.requests[0]["messages"][0]["content"]   # the rider's own words
 
-def test_silent_audio_gets_friendly_400():
-    r = client().post("/process", data={"user_id": "u1"}, files={"audio": ("n.wav", silent_audio(), "audio/wav")})
-    assert r.status_code == 400 and "silent" in r.json()["detail"].lower() or "speech" in r.json()["detail"].lower()
-
-
-def test_voice_note_to_confirmed_entry_end_to_end():
-    """Mock STT hears 'aaj swiggy se 1400 aaye aur petrol 250 ka dala'; the core parses and saves on 'yes'."""
-    c = client()
-    r = c.post("/process", data={"user_id": "e2e"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
-    assert [(e["type"], e["amount"], e["platform"], e["category"]) for e in r["entries"]] == [
-        ("income", 1400, "Swiggy", "earnings"), ("expense", 250, None, "fuel")]
-    assert all(e["status"] == "pending_confirmation" for e in r["entries"]) and "Please confirm" in r["reply_english"]
-    r2 = c.post("/process", data={"user_id": "e2e", "text": "yes"}).json()
+    n = len(api.requests)
+    r2 = client.post("/process", data={"user_id": "e2e", "text": "haan"}).json()
     assert r2["reply_english"] == "Saved. Today's profit is ₹1,150."
-    r3 = c.post("/process", data={"user_id": "e2e", "text": "how much did I earn today"}).json()
+    assert len(api.requests) == n                                             # confirmations stay local
+
+    r3 = client.post("/process", data={"user_id": "e2e", "text": "aaj kitna kamaya"}).json()
     assert r3["reply_english"].startswith("Today you earned ₹1,400")
+
+
+def test_a_question_is_answered_from_the_database(client, with_model):
+    with_model([[("query_summary", {"kind": "earnings", "period": "this_week"})]])
+    r = client.post("/process", data={"user_id": "q1", "text": "इस हफ़्ते कितना कमाया"}).json()
+    assert r["reply_english"] == "No income recorded this week." and r["intent"] == "query"
+
+
+def test_the_renderer_cannot_invent_a_figure(client, with_model):
+    with_model([[("query_summary", {"kind": "earnings", "period": "today"})]],
+               rendered="आज आपने ₹9,999 कमाए")
+    r = client.post("/process", data={"user_id": "q2", "text": "aaj kitna kamaya"}).json()
+    assert r["reply_user_language"] == "No income recorded today."            # English kept
+    assert any(w.startswith("reply_numbers_invented") for w in r["warnings"])
+
+
+# ---------------------------------------------------------------- voice modes
+def test_typed_text_gets_text_only_by_default(client):
+    r = client.post("/process", data={"user_id": "v1", "text": "hello"}).json()
+    assert r["reply_audio_base64"] is None and r["reply_audio_mime"] is None
+
+
+def test_voice_always_and_never(client):
+    r = client.post("/process", data={"user_id": "v2", "text": "hello", "voice": "always"}).json()
+    assert r["reply_audio_base64"] is not None
+    r = client.post("/process", data={"user_id": "v2", "voice": "never"},
+                    files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
+    assert r["reply_audio_base64"] is None
+
+
+# ---------------------------------------------------------------- audit trail
+def test_messages_are_recorded(client, with_model):
+    with_model([[("query_summary", {"kind": "earnings", "period": "today"})]])
+    client.post("/process", data={"user_id": "a1", "text": "aaj kitna kamaya"})
+    row = client.app.state.db.execute(
+        "SELECT intent, actions_json, latency_ms FROM messages WHERE user_id = 'a1'").fetchone()
+    assert row["intent"] == "query" and "query_summary" in row["actions_json"]
+    assert row["latency_ms"] >= 0
+
+
+def test_health(client):
+    assert client.get("/health").json() == {"status": "ok"}

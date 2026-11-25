@@ -1,4 +1,5 @@
-"""Reply wording. Short English sentences that translate cleanly. Amounts are digits with the rupee sign."""
+"""Reply wording: short English sentences that reword cleanly into other languages.
+Amounts are digits with the rupee sign; every figure is computed by tools.py, never by a model."""
 from datetime import date
 
 

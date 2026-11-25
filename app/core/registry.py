@@ -1,9 +1,9 @@
 """Action registry: every capability the assistant has is declared once here.
 
 An action has a name, a description, a JSON input schema, and handlers. The same declaration serves
-  - the rule-based router today (engine.py calls `execute` with arguments the rules extracted),
-  - an LLM tool-calling layer (`tool_definitions()` is the tool list; the model only picks an action and
-    fills its arguments, our code validates and runs it),
+  - the model-driven router (brain.py calls `execute` with the arguments the model chose),
+  - the model's tool list (`tool_definitions()`; the model only picks an action and fills its arguments,
+    and our code validates and runs it),
   - an MCP server later (a thin adapter over the same definitions).
 
 Writes never apply immediately: a write action's `run` PROPOSES (stores a pending action and returns a

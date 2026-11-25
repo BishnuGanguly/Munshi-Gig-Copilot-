@@ -4,64 +4,39 @@ A voice-first earnings and expense assistant for Indian gig workers (delivery an
 
 A rider sends a voice note — *"aaj Swiggy se 1400 aaye aur petrol 250 ka dala"* — and Munshi logs it, reads
 it back for confirmation, and answers questions about their own money. Riders never pick a language: it is
-detected per message and the reply comes back in the same one. **Internally everything is English**, so the
-parsing, rules and maths live in one language.
+detected per message and the reply comes back in the same one.
 
 **Status: backend only.** There is no app and no WhatsApp bot yet; the channel plugs in on top of
-`POST /process`. 340 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
+`POST /process`. 257 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
 trusting any provider-facing part.
 
-## Two pipelines
-
-`PIPELINE` in `.env` chooses how a message is understood. Both share the audio and voice ends.
-
-**`llm` — the LLM-first path** (`app/core/brain.py`), being moved to:
+## The pipeline
 
 ```
-voice note → Sarvam STT → numbers.py (दो सौ पचास → 250)
-           → yes / no?  answered locally, no model call
-           → the model picks an action (reading the rider's own language)
-           → our code validates it, runs it, computes every number
-           → the model renders our English sentence in the rider's language
-           → Sarvam TTS → voice note
+voice note or text
+  ├─ audio clean-up   ffmpeg → 16 kHz mono WAV                      app/audio/
+  ├─ speech-to-text   Sarvam (it also reports the language)         app/stt/
+  ├─ digits           दो सौ पचास → 250; swigi → Swiggy              app/text/
+  ├─ yes / no?        answered locally, no model call               app/core/validate.py
+  ├─ understand       the model picks an action from the registry    app/core/brain.py
+  ├─ execute          our code validates it and computes the numbers app/core/actions.py, tools.py
+  ├─ reword           the model puts our reply in the rider's words  app/core/brain.py
+  └─ voice note       Sarvam text-to-speech → OGG/Opus              app/tts/
 ```
 
-No translation chain, no language detection, no cue-word regexes. Measurement drove this: with the rules
-alone, logging worked in every language (100% on regional-language samples, because `numbers.py` does the
-real work), but questions scored 42% in Hindi and **0%** in Tamil, Kannada, Bengali, Telugu and Marathi.
-A multilingual model reads those directly.
+There is no translation chain, no language detection and no cue-word regexes. The model reads the rider's
+own words, in any Indian language. Measurement drove that: with regex rules, logging worked in every
+language (100% on the regional-language samples, because `app/text/` does the real work) but questions
+scored 42% in Hindi and **0%** in Tamil, Kannada, Bengali, Telugu and Marathi.
 
 Three things stay in code on purpose:
 
-- **Amounts.** `numbers.py` converts spoken amounts to digits before the model sees them. That is
+- **Amounts.** `app/text/numbers.py` converts spoken amounts to digits before the model sees them. That is
   arithmetic, not understanding — and the number guard compares the model's figures against the rider's
-  text, so the text has to carry digits for it to work at all.
+  text, so the text has to carry digits for the guard to work at all.
 - **Yes and no.** The commonest message in the app, answered in a few lines with no round-trip.
 - **Every number the rider is told.** Figures come from SQL in `tools.py`. The model only *rewords* our
   sentence, and a guard rejects the rewording if it contains a number we did not state.
-
-Needs `BRAIN=anthropic` and `ANTHROPIC_API_KEY`; without them it answers "I could not understand" rather
-than guessing. **Every message costs a round-trip** (roughly ₹10 per rider per month on Haiku), so there is
-no free offline path.
-
-**`rules` — the original path** (default for now, `app/core/engine.py`), kept so the two can be compared on
-real voice notes:
-
-```
-voice note or text
-
-```
-voice note or text
-  ├─ audio clean-up      ffmpeg → 16 kHz mono WAV            app/audio/
-  ├─ speech-to-text      Sarvam | faster-whisper | mock      app/stt/
-  ├─ language detected   from the audio, or the text's script app/translate/languages.py
-  ├─ normalise           spoken amounts → digits, platforms   app/translate/numbers.py
-  ├─ translate           → English, numbers verified           app/translate/
-  ├─ route + execute     rules first, LLM only if they fail    app/core/
-  ├─ reply               short English sentence                app/core/replies.py
-  ├─ translate back      → the rider's language                app/translate/
-  └─ voice reply         → OGG/Opus voice note                 app/tts/
-```
 
 ## Quick start
 
@@ -70,12 +45,11 @@ uv sync                      # creates .venv and installs everything, including 
 cp .env.example .env         # copy on Windows; then edit it
 uv run pytest -q             # 340 passed
 uv run python scripts/chat_cli.py --fresh
-uv run python scripts/chat_cli.py --llm --fresh   # the LLM-first pipeline
 ```
 
 Out of the box every provider is a **mock**, so it runs with no API keys and at no cost. Set
-`STT_PROVIDER=sarvam`, `TRANSLATE_PROVIDER=sarvam`, `TTS_PROVIDER=sarvam` and `SARVAM_API_KEY` in `.env`
-for the real thing.
+`STT_PROVIDER=sarvam`, `TTS_PROVIDER=sarvam`, `SARVAM_API_KEY`, plus `BRAIN=anthropic` and
+`ANTHROPIC_API_KEY`, in `.env` for the real thing. Without `BRAIN` set, nothing can be understood.
 
 A sample conversation:
 
@@ -103,9 +77,9 @@ in SQL or Python (`app/core/tools.py`), never produced by a model.
 
 | | |
 |---|---|
-| **Log** | Income, expenses and savings; several per message; "yesterday"; `1.5k`; bonuses as `incentive`. Money is told apart from quantities, so "5 litres for 500" records ₹500. |
+| **Log** | Income, expenses and savings; several per message; "yesterday"; bonuses as `incentive`. |
 | **Never guesses** | If income versus expense is unclear it asks ("Was ₹500 income or an expense?"). Amounts outside ₹1–₹50,000 are refused. |
-| **Correct** | "it was 300 not 250", "250 nahi 300", "should be 300", "actually it was diesel" — on the unsaved entry, or on the last saved one (confirmed first). |
+| **Correct** | "it was 300 not 250", "should be 300", "actually it was diesel" — the last saved entry, confirmed first. A correction to an entry still awaiting confirmation replaces it. |
 | **Delete** | "delete last entry", "undo" — confirmed first. |
 | **Ask** | Earnings, spending (by category), profit, best platform, savings, summary — for today, yesterday, this/last week, this/last month, or overall. |
 | **Daily target** | Per rider, confirmed before it changes, with history kept so a past day is judged by the target in force then. Progress after each save, plus a streak. |
@@ -113,66 +87,67 @@ in SQL or Python (`app/core/tools.py`), never produced by a model.
 
 One intent per message. Unconfirmed actions expire after 30 minutes.
 
-## How a message is routed
+## How a message is handled
 
-1. **An action waiting for confirmation** → yes / no / a correction / an answer to a question.
-2. **Rules** (`app/core/parser.py`) — free, instant, and they handle the common phrasings.
-3. **The LLM understanding layer** (`app/core/llm_router.py`) — only when the rules cannot place the
-   message, or found an amount but could not tell income from expense. **Off by default.**
+1. **A confirmation** — yes or no, matched locally against a word list. No model call.
+2. **Everything else** — one model call picks an action; our code validates and runs it.
+3. **The reply** — our English sentence, reworded by the model into the rider's language.
+
+Without `BRAIN=anthropic` step 2 cannot run, and the assistant says it did not understand rather than
+guessing.
 
 ### The action registry
 
 Every capability is declared once in `app/core/actions.py` — name, description, JSON input schema,
-read-only or write, and handlers. `engine.py` is only a router; the handlers hold the logic.
+read-only or write, and handlers. `brain.py` only routes; the handlers hold the logic.
 
 Seven actions: `log_entries`, `correct_entry`, `delete_entry`, `query_summary`, `set_target`,
 `get_target_progress`, `help`.
 
-The same declarations serve three consumers, so a new feature is one `register(...)` call:
-
-- the rule router, via `REGISTRY.execute(name, args, ctx)`
-- the LLM layer, via `REGISTRY.tool_definitions()` as its tool list
-- an MCP server later, as a thin adapter
+The same declarations are the model's tool list (`REGISTRY.tool_definitions()`) and could back an MCP
+server later, so a new feature is one `register(...)` call.
 
 Invariants enforced in code: arguments are schema-validated; **`user_id` is never an argument** (it comes
 from the `Context`), so no caller can act for another rider; a write action only *proposes* (it stores a
 pending action and returns a read-back) and applies on `commit` after a yes.
 
-### The LLM understanding layer
+### What the model is and isn't trusted with
 
-The model **chooses actions; our code executes them.** It never sees or writes the database.
+It **chooses actions**; it never sees or writes the database, and it never states a figure.
 
-- **One call, not an agent loop:** `messages.create` with the registry's tool definitions,
-  `tool_choice: auto`, effort `low`, on `claude-haiku-5-5`. The static system prompt carries
-  `cache_control` so the prefix caches; the date, target and last few turns go in the user turn.
-- **Guards, none of them trusted to the model:** schema validation; **every number in the chosen
-  arguments must appear in the rider's own message**, or the call is dropped (no invented amounts); no
-  `user_id` argument; at most `LLM_ROUTER_MAX_ACTIONS` calls are read and the first usable one runs;
-  writes still need confirmation; the message is sent as data and the prompt says to ignore instructions
-  inside it. Refusals, network errors, a missing package and malformed output all fall back to the rules.
-- **Audit:** a routed message records `llm_router_used` in `warnings`, and the action in
-  `messages.actions_json`.
-- **Turn it on:** `uv sync --extra llm`, then `LLM_ROUTER=anthropic` and `ANTHROPIC_API_KEY=...`.
-  **This is paid** — roughly ₹0.03 per routed message. With it off, nothing changes.
+- **Two calls at most per message**, not an agent loop: `messages.create` with the registry's tool
+  definitions, `tool_choice: auto`, effort `low` on `claude-haiku-5-5`; then a second call to reword the
+  reply (skipped when the rider wrote English). Both system prompts carry `cache_control`, so the prefix
+  caches; the date, target and last few turns go in the user turn.
+- **Guards, none of them trusted to the model:** schema validation; **every number in the chosen arguments
+  must appear in the rider's own message**, or the call is dropped; **the reworded reply may not contain a
+  number our English sentence did not**, or the English stands; no `user_id` argument; at most
+  `BRAIN_MAX_ACTIONS` calls are read and the first usable one runs; writes still need confirmation; the
+  message is sent as data and the prompt says to ignore instructions inside it. Refusals, network errors,
+  a missing package and malformed output all end in an honest "I could not understand".
+- **Audit:** every message records its intent and the actions it caused in `messages.intent` /
+  `actions_json`.
+- **Cost:** roughly ₹0.03 per message on Haiku, so about ₹10 per rider per month. **Every message needs a
+  round-trip** — there is no free offline path.
 
 ## Languages
 
-- **Voice:** the language Sarvam reports for the audio.
-- **Text:** detected from the script (Devanagari, Bengali, Tamil, Telugu, Kannada, Gujarati, Gurmukhi,
-  Odia, Malayalam). Latin text is English or **Hinglish** (`hi-Latn`), which is replied to in Roman script
-  but *spoken* with a Hindi voice, because Roman script reads badly aloud.
-- **A message with no script clue** (for example just `1400`) reuses the rider's last language.
+The rider never selects one.
 
-Before translation (`app/translate/normalize.py`, `numbers.py`):
+- **Voice:** Sarvam reports the language of the audio, and that is what the reply is spoken in.
+- **Text:** the model replies in whatever language and script the rider wrote in, and reports the code.
+  Hinglish (`hi-Latn`) is answered in Roman script but *spoken* by the Hindi voice, because Roman script
+  reads badly aloud. A language with no Sarvam voice is spoken in English.
+
+Before the model sees a message (`app/text/`):
 
 - digits of any script → `0-9`
 - spoken Hindi amounts → digits: `दो सौ पचास` and `dhai sau` both become 250; also dedh, sawa, saadhe,
   paune, hazaar, lakh. A lone small word like `दो` ("give") is only converted when a currency word follows.
 - platform spellings → canonical: `स्विगी`, `swigi` → `Swiggy`
 
-After translation, **every number in the input must still be present in the output**. If a provider drops
-one, the next provider is tried; if all do, the result carries a warning. Reply digits are always `0-9`.
-If translating the reply fails, the rider gets the English reply plus a warning rather than nothing.
+`1,400` and `1400` count as the same figure in both number guards, so Indian digit grouping never makes a
+correct reply look invented.
 
 ## HTTP API
 
@@ -210,7 +185,6 @@ uv run python scripts/chat_cli.py --debug --fresh   # full conversation; --voice
 uv run python scripts/process_cli.py note1.ogg      # one message through the pipeline, as JSON
 uv run python scripts/transcribe_cli.py note1.ogg   # audio → transcript, language, confidence
 uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN
-uv run python scripts/eval_translation.py           # 75 sample sentences, scored per language
 ```
 
 `chat_cli.py` is multi-turn, so confirmations work; a path to an audio file sends it as a voice note.
@@ -239,10 +213,8 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 | Group | Keys |
 |---|---|
 | **Speech-to-text** | `STT_PROVIDER` (`mock`/`sarvam`/`faster_whisper`), `STT_FALLBACK`, `STT_MIN_CONFIDENCE`, `SARVAM_API_KEY`, `SARVAM_MODEL`, `SARVAM_LANGUAGE_CODE`, `SARVAM_MODE`, `WHISPER_MODEL` |
-| **Translation** | `TRANSLATE_PROVIDER` (`mock`/`sarvam`/`llm`), `TRANSLATE_FALLBACK`, `SARVAM_TRANSLATE_MODEL`, `SARVAM_NUMERALS_FORMAT`, `SARVAM_ROMAN_SCRIPT`, `LLM_TRANSLATE_MODEL` |
 | **Voice replies** | `TTS_PROVIDER` (`mock`/`sarvam`), `SARVAM_TTS_MODEL`, `SARVAM_TTS_SPEAKER`, `VOICE_MAX_CHARS` |
-| **Pipeline** | `PIPELINE` (`rules`/`llm`), `BRAIN` (`none`/`anthropic`), `BRAIN_MODEL`, `BRAIN_RENDER_MODEL` |
-| **LLM layer** | `LLM_ROUTER` (`none`/`anthropic`), `LLM_ROUTER_MODEL`, `LLM_ROUTER_MAX_ACTIONS`, `PARSER_LLM`, `LLM_PARSE_MODEL`, `ANTHROPIC_API_KEY` |
+| **The model** | `BRAIN` (`none`/`anthropic`), `ANTHROPIC_API_KEY`, `BRAIN_MODEL`, `BRAIN_RENDER_MODEL`, `BRAIN_MAX_ACTIONS` |
 | **Audio** | `MAX_AUDIO_SECONDS`, `SILENCE_RMS_THRESHOLD`, `FFMPEG_BIN` |
 | **App** | `DB_PATH`, `LOG_LEVEL` |
 
@@ -254,21 +226,20 @@ Optional extras: `uv sync --extra llm` (Claude) and `uv sync --extra whisper` (o
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 340 tests:** audio handling, number words and normalisation, language detection, the
-parser, the engine and every confirmation flow, the registry and its guards, migrations, targets, and the
-LLM layer against a fake client (including hostile and malformed output).
+**Covered by the 257 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, and
+the model-facing code against fake clients — including output that invents numbers or tries to act for
+another rider.
 
 **Not verified — no live call has ever been made:**
 
-- **Sarvam translation.** The parameters `numerals_format` and `output_script` are informed guesses; on
-  HTTP 400/422 the code retries once without them.
+- **The Claude API.** The request shape is checked against the installed SDK (2.13.0), nothing more.
+  Nothing here has ever spoken to a model.
 - **Sarvam text-to-speech.** Whether the language field is `target_language_code` or `language_code` is
   unconfirmed, so the code retries with the other name; speaker names for a newer Bulbul than v2 are
   unchecked; and nobody has heard how it reads `₹1,400` aloud.
-- **The Claude API.** The request shape is checked against the installed SDK (2.13.0), nothing more.
 - **The regional-language sample sentences** (Tamil, Kannada, Bengali, Telugu, Marathi in
-  `tests/data/sentences.json`) were written without a native speaker and need review before the scores
-  from `eval_translation.py` mean anything.
+  `tests/data/sentences.json`) were written without a native speaker and need review.
 
 ## Not built yet
 
@@ -287,30 +258,29 @@ app/
   config.py            .env settings
   pipeline.py          stage-by-stage orchestration, per-stage latency logs
   errors.py            AudioError, UnclearAudioError, ServiceUnavailableError
-                       (+ Stt/Translate/TtsUnavailableError subclasses)
+                       (+ Stt/TtsUnavailableError subclasses)
   api/routes.py        /process, /speak, /health
   audio/               ffmpeg clean-up, validation, voice-note encoding
   stt/                 interface + sarvam, whisper_local, mock
-  translate/           languages, numbers, normalize, service + sarvam, llm, mock
+  text/                numbers (spoken amounts → digits), normalize, chunk
   tts/                 service + sarvam, mock
   core/
+    brain.py           the two model calls, their guards, and the routing
     registry.py        ActionSpec, Registry, Context, schema validation
     actions.py         the seven action handlers + build_registry()
-    engine.py          the router
-    parser.py          rule-based parsing (logs, corrections, queries, yes/no, targets)
     tools.py           all database reads and writes; every number shown comes from here
+    validate.py        amount limits, field values, and yes/no
     db.py              schema + versioned migrations
-    llm_router.py      the LLM understanding layer
-    llm_parser.py      older extraction-only fallback
     dates.py           IST and period resolution
-    vocab.py           platform, category and cue words
     replies.py         reply wording and ₹ formatting
-scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, eval_translation
-tests/                 340 tests; tests/data/sentences.json holds the 75 sample sentences
+scripts/               chat_cli, process_cli, transcribe_cli, speak_cli
+tests/                 257 tests; tests/data/sentences.json holds the 75 sample sentences
 ```
 
 ## History
 
-Built in order: a FastAPI scaffold with mocks; audio input and speech-to-text; the language layer; the
-English core; voice replies; the action registry, migrations and the daily target; the LLM understanding
-layer. `git log` has the detail.
+Built in order: a FastAPI scaffold with mocks; audio input and speech-to-text; a translation layer; a
+rule-based English core; voice replies; the action registry, migrations and the daily target; an LLM
+understanding layer beside the rules; then — once measurement showed the rules could not answer questions
+in regional languages at all — the translation chain and the regexes were deleted and the model took over
+understanding. `git log` has the detail.

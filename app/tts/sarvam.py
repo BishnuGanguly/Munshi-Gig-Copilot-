@@ -19,7 +19,7 @@ import httpx
 
 from app.audio import concat_wavs
 from app.errors import AudioError, TtsUnavailableError
-from app.translate.sarvam import split_text
+from app.text.chunk import split_text
 
 log = logging.getLogger("munshi.tts.sarvam")
 URL = "https://api.sarvam.ai/text-to-speech"

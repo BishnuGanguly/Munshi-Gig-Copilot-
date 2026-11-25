@@ -1,4 +1,4 @@
-"""Text clean-up applied BEFORE translation, and number checks applied AFTER it."""
+"""Text clean-up applied before the model sees a message."""
 import re
 
 from .numbers import normalize_digits, words_to_digits
@@ -53,15 +53,3 @@ _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 def extract_numbers(text: str) -> list[str]:
     """Numbers in `text` as plain digit strings: '1,400' -> '1400'. Native digits are converted first."""
     return [n.replace(",", "") for n in _NUM.findall(normalize_digits(text))]
-
-
-def numbers_preserved(source: str, output: str) -> tuple[bool, list[str]]:
-    """True when every number in `source` also appears in `output`. Returns (ok, missing_numbers)."""
-    have = extract_numbers(output)
-    missing = []
-    for n in extract_numbers(source):
-        if n in have:
-            have.remove(n)  # each occurrence must be matched
-        else:
-            missing.append(n)
-    return not missing, missing

@@ -8,11 +8,9 @@ from fastapi.testclient import TestClient
 from app.audio import to_voice_note
 from app.errors import TtsUnavailableError
 from app.main import create_app
-from app.translate import get_language_service
-from app.translate.languages import HINGLISH
 from app.tts.mock import MockTts
 from app.tts.sarvam import SarvamTts
-from app.tts.service import make_voice_note
+from app.tts.service import speak
 from tests.audio_helpers import make_audio
 
 
@@ -85,7 +83,7 @@ def test_sarvam_tts_bad_payloads(monkeypatch):
         sarvam(lambda r: httpx.Response(200, json={"audios": [base64.b64encode(b"not a wav").decode()]})).synthesize("hi", "en-IN")
 
 
-# ---------------------------------------------------------------- choosing what to speak
+# ---------------------------------------------------------------- speak(): text already in its language
 class Recorder:
     name = "rec"
 
@@ -97,33 +95,20 @@ class Recorder:
         return MockTts().synthesize(text, lang)
 
 
-def speak(reply_user, reply_en, language, translated=True, tts=None):
-    svc = get_language_service()           # mock translator (returns text unchanged)
-    return make_voice_note(reply_user, reply_en, language, translated, svc, tts)
-
-
-def test_speaks_the_users_language():
+def test_speak_passes_the_text_and_language_straight_through():
+    """The renderer already produced the text and its language code: no juggling left to do here."""
     rec = Recorder()
-    ogg, w = speak("आज का मुनाफ़ा ₹1150", "Today's profit is ₹1150", "hi-IN", tts=rec)
-    assert ogg[:4] == b"OggS" and rec.calls == [("आज का मुनाफ़ा ₹1150", "hi-IN")] and w == []
-
-
-def test_english_and_untranslated_replies_are_spoken_in_english():
-    rec = Recorder()
-    speak("Saved.", "Saved.", "en-IN", tts=rec)
-    speak("Saved.", "Saved.", "ta-IN", translated=False, tts=rec)
-    assert [c[1] for c in rec.calls] == ["en-IN", "en-IN"]
-
-
-def test_hinglish_text_is_spoken_in_hindi_voice():
-    rec = Recorder()
-    speak("Aaj ka profit 1150 hai", "Today's profit is 1150", HINGLISH, tts=rec)
-    assert rec.calls[0][1] == "hi-IN"
+    ogg, warnings = speak("आज का मुनाफ़ा ₹1150", "hi-IN", tts=rec)
+    assert ogg[:4] == b"OggS" and rec.calls == [("आज का मुनाफ़ा ₹1150", "hi-IN")] and warnings == []
 
 
 def test_long_reply_stays_text_only():
-    ogg, w = speak("x" * 500, "x" * 500, "en-IN")
-    assert ogg is None and w == ["voice_skipped_long_reply"]
+    ogg, warnings = speak("x" * 500, "en-IN", tts=Recorder())
+    assert ogg is None and warnings == ["voice_skipped_long_reply"]
+
+
+def test_empty_reply_is_not_spoken():
+    assert speak("   ", "en-IN", tts=Recorder()) == (None, [])
 
 
 def test_tts_failure_never_raises():
@@ -133,8 +118,8 @@ def test_tts_failure_never_raises():
         def synthesize(self, text, lang):
             raise TtsUnavailableError("down")
 
-    ogg, w = speak("Saved.", "Saved.", "en-IN", tts=Boom())
-    assert ogg is None and w[0].startswith("voice_reply_failed")
+    ogg, warnings = speak("Saved.", "en-IN", tts=Boom())
+    assert ogg is None and warnings[0].startswith("voice_reply_failed")
 
 
 # ---------------------------------------------------------------- pipeline and API
@@ -185,5 +170,5 @@ def test_voice_failure_keeps_the_text_reply(monkeypatch):
 
     monkeypatch.setattr("app.tts.service.get_tts", lambda: Boom())
     r = client().post("/process", data={"user_id": "v5"}, files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
-    assert r["reply_audio_base64"] is None and "Please confirm" in r["reply_english"]
+    assert r["reply_audio_base64"] is None and r["reply_english"]
     assert any(w.startswith("voice_reply_failed") for w in r["warnings"])

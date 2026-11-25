@@ -1,16 +1,15 @@
-"""Action handlers, and the registry that exposes them. Logic only; routing lives in engine.py.
+"""Action handlers, and the registry that exposes them. Logic only; app/core/brain.py routes to them.
 
 Every number shown to the user is computed here with tools.* (SQL/code), never by a model."""
 import re
 from datetime import date
 
-from . import dates, parser, replies, tools
+from . import dates, replies, tools, validate
 from .registry import ActionSpec, Context, Outcome, Registry
 from .replies import fmt_money
 
-CATEGORIES = ["earnings", "incentive", "fuel", "repair", "recharge", "emi", "rent", "food", "penalty", "other", "savings"]
-PLATFORMS = ["Swiggy", "Zomato", "Uber", "Ola", "Rapido", "Blinkit", "Zepto", "Porter", "Dunzo", "Amazon", "Flipkart",
-             "BigBasket", "inDrive"]
+CATEGORIES = validate.ALL_CATEGORIES
+PLATFORMS = validate.PLATFORMS
 
 
 # ------------------------------------------------------------------ shared helpers
@@ -66,7 +65,7 @@ def progress_sentence(p: dict) -> str:
 # ------------------------------------------------------------------ log_entries
 def _log_run(ctx: Context, args: dict) -> Outcome:
     entries = [_complete(e, ctx.today) for e in args["entries"]]
-    problems = [p for e in entries for p in parser.validate_entry(e)]
+    problems = [p for e in entries for p in validate.validate_entry(e)]
     if "amount_out_of_range" in problems:
         return Outcome(replies.BAD_AMOUNT, intent="log")
     if "needs_type" in problems:
@@ -102,7 +101,7 @@ def _correct_run(ctx: Context, args: dict) -> Outcome:
     fields = {k: args[k] for k in ("amount", "category", "platform", "type") if args.get(k) is not None}
     if not fields:
         return Outcome("What should I change? For example: it should be 300.", intent="correct")
-    if "amount" in fields and not (parser.MIN_AMOUNT <= fields["amount"] <= parser.MAX_AMOUNT):
+    if "amount" in fields and not (validate.MIN_AMOUNT <= fields["amount"] <= validate.MAX_AMOUNT):
         return Outcome(replies.BAD_AMOUNT, intent="correct")
     tools.set_pending(ctx.conn, ctx.user_id, {"action": "correct_entry", "tx_id": last["id"], "fields": fields}, ctx.now)
     return Outcome(update_readback(last, fields, ctx.today), intent="correct")
@@ -129,58 +128,12 @@ def _delete_commit(ctx: Context, pending: dict) -> Outcome:
     return Outcome("Deleted." if ok else "I could not find that entry any more.", intent="confirm")
 
 
-# ------------------------------------------------------------------ correcting an action that is still waiting for yes
-def correct_pending(ctx: Context, pending: dict, c: parser.Correction) -> Outcome:
-    conn, user_id, now, today = ctx.conn, ctx.user_id, ctx.now, ctx.today
-    action = pending["action"]
-    if action == "delete_entry":
-        return Outcome("Say yes to delete the entry, or no to keep it.", intent="correct")
-    if action == "set_target":
-        if c.new_amount is None:
-            return Outcome("Say yes to confirm the target, or tell me the amount you want.", intent="correct")
-        if not (parser.TARGET_MIN <= c.new_amount <= parser.TARGET_MAX):
-            return Outcome(_target_range_msg(), intent="correct")
-        pending["amount"] = c.new_amount
-        tools.set_pending(conn, user_id, pending, now)
-        return Outcome(_target_proposal(ctx, c.new_amount), intent="correct")
-    if action == "correct_entry":
-        f = pending["fields"]
-        for key, val in (("amount", c.new_amount), ("category", c.category), ("platform", c.platform), ("type", c.type)):
-            if val is not None:
-                f[key] = val
-        if f.get("amount") is not None and not (parser.MIN_AMOUNT <= f["amount"] <= parser.MAX_AMOUNT):
-            return Outcome(replies.BAD_AMOUNT, intent="correct")
-        tools.set_pending(conn, user_id, pending, now)
-        return Outcome(update_readback(tools.get_last_transaction(conn, user_id), f, today), intent="correct")
-    entries = pending["entries"]                                    # action == "log_entries"
-    if c.old_amount is not None:
-        target = next((e for e in entries if e["amount"] == c.old_amount), None)
-        if target is None:
-            return Outcome(f"I do not see {fmt_money(c.old_amount)} in the entry. " + readback(entries, today), intent="correct")
-    elif len(entries) == 1:
-        target = entries[0]
-    else:
-        return Outcome("Which entry do you want to change? Say for example: 250 not 300.", intent="correct")
-    if c.new_amount is not None:
-        target["amount"] = c.new_amount
-    if c.type:
-        apply_type(target, c.type)
-    if c.category and target["type"] == "expense":
-        target["category"] = c.category
-    if c.platform:
-        target["platform"] = c.platform
-    if any(parser.validate_entry(e) for e in entries):
-        return Outcome(replies.BAD_AMOUNT, intent="correct")
-    tools.set_pending(conn, user_id, pending, now)
-    return Outcome(readback(entries, today), [entry_out(e, "pending_confirmation") for e in entries], "correct")
-
-
 # ------------------------------------------------------------------ query_summary
 def _phrase(label: str, rest: str) -> str:
     return f"{label[0].upper()}{label[1:]} {rest}"
 
 
-def answer_query(ctx: Context, q: parser.Query) -> str:
+def answer_query(ctx: Context, q: validate.Query) -> str:
     if q.kind == "hours":
         return "I do not track working hours yet."
     if q.kind == "goals":
@@ -226,13 +179,13 @@ def answer_query(ctx: Context, q: parser.Query) -> str:
 
 
 def _query_run(ctx: Context, args: dict) -> Outcome:
-    q = parser.Query(args["kind"], args.get("period") or "today", args.get("category"), args.get("platform"))
+    q = validate.Query(args["kind"], args.get("period") or "today", args.get("category"), args.get("platform"))
     return Outcome(answer_query(ctx, q), intent="query")
 
 
 # ------------------------------------------------------------------ set_target / get_target_progress
 def _target_range_msg() -> str:
-    return f"A daily target must be between {fmt_money(parser.TARGET_MIN)} and {fmt_money(parser.TARGET_MAX)}."
+    return f"A daily target must be between {fmt_money(validate.TARGET_MIN)} and {fmt_money(validate.TARGET_MAX)}."
 
 
 def _target_proposal(ctx: Context, amount: float) -> str:
@@ -244,7 +197,7 @@ def _target_proposal(ctx: Context, amount: float) -> str:
 
 def _set_target_run(ctx: Context, args: dict) -> Outcome:
     amount = float(args["amount"])
-    if not (parser.TARGET_MIN <= amount <= parser.TARGET_MAX):
+    if not (validate.TARGET_MIN <= amount <= validate.TARGET_MAX):
         return Outcome(_target_range_msg(), intent="target")
     if tools.get_target(ctx.conn, ctx.user_id, ctx.today) == amount:
         return Outcome(f"Your daily income target is already {fmt_money(amount)}.", intent="target")

@@ -1,5 +1,5 @@
-"""The LLM-first pipeline (`PIPELINE=llm`). Fake clients stand in for the API, so these tests pin down what
-the code does with whatever the model returns - including output that invents numbers."""
+"""The pipeline's understanding and wording. Fake clients stand in for the API, so these tests pin down
+what the code does with whatever the model returns - including output that invents numbers."""
 import base64
 import json
 from datetime import datetime
@@ -9,8 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core import brain, dates, db, tools
 from app.core.actions import REGISTRY
-from app.core.brain import Renderer, preprocess, speakable
-from app.core.llm_router import LlmRouter
+from app.core.brain import Renderer, Understander, preprocess, speakable
 from app.main import create_app
 from tests.audio_helpers import make_audio
 
@@ -48,7 +47,7 @@ def client_of(api):
 
 def router_for(calls):
     api = FakeApi(calls=calls)
-    return LlmRouter(REGISTRY, client=client_of(api), system=brain.SYSTEM_UNDERSTAND), api
+    return Understander(REGISTRY, client=client_of(api)), api
 
 
 def renderer_for(language="hi-IN", reply="theek hai", **kw):
@@ -75,7 +74,7 @@ def saved(chat):
 # ---------------------------------------------------------------- what we deliberately keep in code
 @pytest.mark.parametrize("raw,expected", [
     ("आज मैं दो सौ पचास रुपए का बचत किया", "आज मैं 250 रुपए का बचत किया"),
-    ("zomato se dedh hazaar mile", "zomato se 1500 mile"),
+    ("zomato se dedh hazaar mile", "Zomato se 1500 mile"),
     ("saadhe teen sau kharcha", "350 kharcha"),
     ("१४०० आए", "1400 आए"),
     ("इन்று 1400 கிடைத்தது", "इन்று 1400 கிடைத்தது"),
@@ -87,9 +86,9 @@ def test_amounts_become_digits_before_the_model_sees_them(raw, expected):
 
 def test_confirmations_never_reach_the_model(chat):
     r, api = router_for([("log_entries", {"entries": [{"type": "income", "amount": 500}]})])
-    chat("500 aaya", router=r)
+    chat("500 aaya", understander=r)
     calls_before = len(api.requests)
-    out = chat("haan theek hai", router=r)                     # yes, in Hinglish
+    out = chat("haan theek hai", understander=r)                     # yes, in Hinglish
     assert out.outcome.reply.startswith("Saved")
     assert len(api.requests) == calls_before                   # no round-trip for the commonest message
     assert saved(chat)[0]["amount"] == 500
@@ -97,15 +96,15 @@ def test_confirmations_never_reach_the_model(chat):
 
 def test_no_discards_locally(chat):
     r, api = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
-    chat("250 petrol", router=r)
+    chat("250 petrol", understander=r)
     n = len(api.requests)
-    assert "discarded" in chat("nahi", router=r).outcome.reply
+    assert "discarded" in chat("nahi", understander=r).outcome.reply
     assert len(api.requests) == n and saved(chat) == []
 
 
 def test_yes_with_nothing_pending(chat):
     r, api = router_for([])
-    assert chat("yes", router=r).outcome.reply.startswith("There is nothing")
+    assert chat("yes", understander=r).outcome.reply.startswith("There is nothing")
     assert api.requests == []
 
 
@@ -113,7 +112,7 @@ def test_yes_with_nothing_pending(chat):
 def test_regional_language_logging_end_to_end(chat):
     r, _ = router_for([("log_entries", {"entries": [{"type": "income", "amount": 1400, "platform": "Swiggy"}]})])
     rend, rapi = renderer_for("ta-IN", "இன்று ₹1,400 வரவு Swiggy. சரியா?")
-    out = chat("இன்று ஸ்விக்கியில் 1400 ரூபாய் கிடைத்தது", router=r, renderer=rend)
+    out = chat("இன்று ஸ்விக்கியில் 1400 ரூபாய் கிடைத்தது", understander=r, renderer=rend)
     assert "Please confirm: income ₹1,400 from Swiggy" in out.outcome.reply      # our English fact
     assert out.reply_user == "இன்று ₹1,400 வரவு Swiggy. சரியா?"                  # rendered for the rider
     assert out.reply_language == "ta-IN" and saved(chat) == []                   # still unconfirmed
@@ -123,16 +122,16 @@ def test_regional_language_logging_end_to_end(chat):
 def test_no_translation_call_is_made(chat):
     """The rider's words go to the model as they are - there is no to_english hop any more."""
     r, api = router_for([("query_summary", {"kind": "earnings", "period": "this_week"})])
-    chat("इस हफ़्ते कितना कमाया", router=r, renderer=None)
+    chat("इस हफ़्ते कितना कमाया", understander=r, renderer=None)
     sent = api.requests[0]["messages"][0]["content"]
     assert "इस हफ़्ते कितना कमाया" in sent
 
 
 def test_a_correction_while_pending_replaces_it(chat):
     r1, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
-    chat("250 ka petrol", router=r1)
+    chat("250 ka petrol", understander=r1)
     r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}]})])
-    out = chat("250 nahi 300 tha", router=r2)
+    out = chat("250 nahi 300 tha", understander=r2)
     assert "₹300" in out.outcome.reply
     assert "An action is already waiting" in api2.requests[0]["messages"][0]["content"]   # the model is told
     chat("haan")
@@ -141,19 +140,19 @@ def test_a_correction_while_pending_replaces_it(chat):
 
 def test_target_flow(chat):
     r, _ = router_for([("set_target", {"amount": 1500})])
-    assert "₹1,500" in chat("roz 1500 kamana hai", router=r).outcome.reply
+    assert "₹1,500" in chat("roz 1500 kamana hai", understander=r).outcome.reply
     chat("haan")
     assert tools.get_target(chat.conn, "u", NOW.date()) == 1500
 
 
 def test_invented_amounts_are_still_dropped(chat):
     r, _ = router_for([("log_entries", {"entries": [{"type": "income", "amount": 9999}]})])
-    out = chat("Swiggy ka paisa aaya", router=r)
+    out = chat("Swiggy ka paisa aaya", understander=r)
     assert "9,999" not in out.outcome.reply and saved(chat) == []
 
 
 def test_without_a_model_it_says_so_rather_than_guessing(chat):
-    out = chat("कुछ भी", router=None, renderer=None)
+    out = chat("कुछ भी", understander=None, renderer=None)
     assert out.outcome.intent == "unknown" and "understanding_unavailable" in out.warnings
 
 
@@ -215,38 +214,49 @@ def test_speakable(code, expected):
 
 # ---------------------------------------------------------------- through the HTTP pipeline
 @pytest.fixture
-def api_client(monkeypatch):
-    monkeypatch.setenv("PIPELINE", "llm")
+def api_client():
     return TestClient(create_app(":memory:"))
 
 
-def test_pipeline_llm_mode_without_a_key_still_answers(api_client):
+def test_pipeline_without_a_key_says_so_rather_than_guessing(api_client):
     r = api_client.post("/process", data={"user_id": "p1", "text": "कुछ भी"}).json()
     assert r["intent"] == "unknown" and "understanding_unavailable" in r["warnings"]
     assert r["normalized_text"] == "कुछ भी"
 
 
-def test_pipeline_llm_mode_voice_in_voice_out(api_client, monkeypatch):
+def test_pipeline_voice_in_voice_out(api_client, monkeypatch):
     """The mock speech-to-text hears Hinglish; with no model the reply is English, and it is still spoken."""
     r = api_client.post("/process", data={"user_id": "p2"},
                         files={"audio": ("n.ogg", make_audio("ogg"), "audio/ogg")}).json()
-    assert r["normalized_text"] == "aaj swiggy se 1400 aaye aur petrol 250 ka dala"
+    assert r["normalized_text"] == "aaj Swiggy se 1400 aaye aur petrol 250 ka dala"
     assert base64.b64decode(r["reply_audio_base64"])[:4] == b"OggS"
 
 
-def test_pipeline_rules_mode_is_still_the_default():
-    r = TestClient(create_app(":memory:")).post(
-        "/process", data={"user_id": "p3", "text": "Got 1400 from Swiggy"}).json()
-    assert "Please confirm: income ₹1,400 from Swiggy" in r["reply_english"]
-
-
-def test_bad_pipeline_name_is_rejected(monkeypatch):
-    monkeypatch.setenv("PIPELINE", "magic")
-    r = TestClient(create_app(":memory:")).post("/process", data={"user_id": "p4", "text": "hi"})
-    assert r.status_code == 400 and "PIPELINE must be one of" in r.json()["detail"]
-
-
-def test_messages_are_audited_in_llm_mode(api_client):
+def test_messages_are_audited(api_client):
     api_client.post("/process", data={"user_id": "p5", "text": "कुछ भी"})
     row = api_client.app.state.db.execute("SELECT intent, actions_json FROM messages").fetchone()
     assert row["intent"] == "unknown"
+
+
+# ---------------------------------------------------------------- digit grouping
+@pytest.mark.parametrize("ours,theirs", [
+    ("Today's profit is ₹1,400.", "Aaj ka munafa 1400 hai"),      # we grouped, the model did not
+    ("Today's profit is ₹1400.", "Aaj ka munafa ₹1,400 hai"),     # the model grouped, we did not
+    ("income ₹1,25,000", "aamdani ₹125000"),                      # Indian grouping
+])
+def test_grouping_differences_are_not_treated_as_invented_numbers(ours, theirs):
+    """Regression: `1,400` and `1400` are the same figure. Comparing them naively rejected good
+    renderings and left riders reading English."""
+    rend, _ = renderer_for("hi-Latn", theirs)
+    reply, _, warnings = rend.render(ours, "kitna hua")
+    assert reply == theirs and warnings == []
+
+
+def test_grouping_does_not_hide_a_real_invention():
+    rend, _ = renderer_for("hi-Latn", "Aaj ka munafa 1,500 hai")
+    assert rend.render("Today's profit is ₹1,400.", "kitna hua")[2][0].startswith("reply_numbers_invented")
+
+
+def test_a_grouped_amount_in_the_transcript_is_grounded(chat):
+    r, _ = router_for([("log_entries", {"entries": [{"type": "income", "amount": 1400, "platform": "Swiggy"}]})])
+    assert "₹1,400" in chat("Swiggy se 1,400 aaye", understander=r).outcome.reply
