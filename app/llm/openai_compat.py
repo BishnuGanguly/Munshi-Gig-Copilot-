@@ -88,6 +88,7 @@ class OpenAICompatProvider:
         self._reasoning_rejected = False
         self.last_finish: str | None = None
         self.last_usage: dict = {}
+        self.last_response: dict = {}          # the provider's whole reply, kept so a failure can be read, not guessed
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.model, self.api_key, self.auth, self.retries = model, api_key or "", auth, retries
         self.client = httpx.Client(timeout=timeout, transport=transport)
@@ -144,6 +145,7 @@ class OpenAICompatProvider:
             message = choice["message"] or {}
         except (KeyError, IndexError, TypeError):
             raise LlmUnavailableError(f"unexpected response shape: {str(data)[:200]}")
+        self.last_response = data
         self.last_finish = choice.get("finish_reason")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         self.last_usage = usage

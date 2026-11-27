@@ -192,10 +192,12 @@ def test_check_llm_passes_a_well_behaved_provider_and_fails_a_poor_one(monkeypat
     assert "[ ok ] picked log_entries" in capsys.readouterr().out
 
     wrong = FakeProvider(turns=[[("help", {})]], text="not json")
+    wrong.last_response = {"choices": [{"message": {"content": "not json"}}]}
     assert check_llm.check(wrong) is False
     out = capsys.readouterr().out
     assert "[FAIL] expected one log_entries call" in out and "render fell back to English" in out
     assert "why  : no JSON object" in out and "model said: 'not json'" in out      # the next run shows the cause
+    assert "the provider's whole reply" in out and '"content": "not json"' in out
 
     assert check_llm.check(FakeProvider(raises=LlmUnavailableError("401"))) is False
 

@@ -9,6 +9,7 @@ mocked servers only: the endpoint, the auth header and the shape of a tool call 
 through search results, never exercised. A failure here names which of those is wrong.
 """
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -58,6 +59,10 @@ def check(provider) -> bool:
         print(f"         why  : {renderer.last_problem}")
         print(f"         model said: {renderer.last_raw[:600]!r}")
         print(f"         finish_reason={getattr(provider, 'last_finish', None)} usage={getattr(provider, 'last_usage', {})}")
+        raw = getattr(provider, "last_response", None)
+        if raw:
+            print("         the provider's whole reply:")
+            print("         " + json.dumps(raw, ensure_ascii=False)[:1800])
         ok = False
     elif language not in ("hi-Latn", "hi-IN"):
         print(f"  [warn] expected Hinglish for a Hinglish message, got {language!r}")
