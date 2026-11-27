@@ -325,3 +325,76 @@ def test_with_no_model_the_reply_says_key_not_set_not_could_not_understand(chat)
 def test_with_a_model_that_fails_the_reply_is_still_could_not_understand(chat):
     out = chat("kuch bhi", understander=Understander(REGISTRY, FakeProvider(turns=[[]])), renderer=None)
     assert "could not understand" in out.outcome.reply and "key" not in out.outcome.reply
+
+
+# ---------------------------------------------------------------- reading the rewording out of a model's reply
+from app.core.brain import parse_render  # noqa: E402
+
+GOOD = '{"language": "hi-Latn", "reply": "Save ho gaya. Aaj ka munafa ₹350 hai."}'
+
+
+@pytest.mark.parametrize("raw", [
+    GOOD,
+    "```json\n" + GOOD + "\n```",                                              # a code fence
+    "Here you go:\n" + GOOD,                                                   # a lead-in
+    GOOD + "\n\nI kept the number as it was {350}.",                           # trailing remark with braces
+    "The format is {language, reply}. The rider wrote Hinglish.\n" + GOOD,     # reasoning with stray braces
+    '{"language": "x", "reply": "<the rewritten reply>"}\n' + GOOD,            # the template echoed first
+    "  \n" + GOOD + "  \n",
+])
+def test_the_rewording_is_found_whatever_surrounds_it(raw):
+    """Regression for a live failure: the old parser took everything from the first { to the last }, so one
+    stray brace anywhere in a reasoning model's output made the whole reply unparseable."""
+    body, problem = parse_render(raw)
+    assert problem == "" and body["reply"] == "Save ho gaya. Aaj ka munafa ₹350 hai." and body["language"] == "hi-Latn"
+
+
+def test_an_answer_wrapped_in_a_list_is_still_found():
+    assert parse_render('[{"language": "hi-IN", "reply": "x"}]')[0]["reply"] == "x"
+
+
+def test_the_last_real_answer_wins_over_an_earlier_draft():
+    raw = '{"language": "hi-IN", "reply": "first try"} on reflection {"language": "hi-Latn", "reply": "final"}'
+    assert parse_render(raw)[0]["reply"] == "final"
+
+
+@pytest.mark.parametrize("raw,why", [
+    ("", "empty reply"), ("   \n ", "empty reply"), (None, "empty reply"),
+    ("Save ho gaya. Aaj ka munafa ₹350 hai.", "no JSON object"),               # plain text, no JSON at all
+    ('{"language": "hi-IN"}', "no usable 'reply'"),
+    ('{"language": "hi-IN", "reply": ""}', "no usable 'reply'"),
+    ('{"language": "hi-IN", "reply": "<the rewritten reply>"}', "no usable 'reply'"),   # only the template
+    ('{"language": "hi-IN", "reply": 350}', "no usable 'reply'"),
+    ('{"reply": "unterminated', "no JSON object"),
+])
+def test_each_failure_says_why(raw, why):
+    body, problem = parse_render(raw)
+    assert body is None and why in problem
+
+
+def test_the_renderer_records_what_the_model_said_and_why_it_was_not_used(caplog):
+    r = Renderer(FakeProvider(text="Save ho gaya."))
+    with caplog.at_level("WARNING", logger="munshi.brain"):
+        reply, lang, warnings = r.render("Saved.", "kitna hua")
+    assert (reply, lang, warnings) == ("Saved.", "en-IN", ["reply_not_rendered"])
+    assert r.last_raw == "Save ho gaya." and "no JSON object" in r.last_problem
+    assert "Save ho gaya." in caplog.text and "render not used" in caplog.text           # visible in the logs
+
+
+def test_the_diagnostics_reset_on_success():
+    r = Renderer(FakeProvider(text="plain"))
+    r.render("Saved.", "x")
+    r.provider.text = GOOD
+    assert r.render("Saved. Today's profit is ₹350.", "x")[2] == [] and r.last_problem == ""
+
+
+def test_a_provider_failure_is_named_in_the_diagnostics():
+    r = Renderer(FakeProvider(raises=LlmUnavailableError("401")))
+    r.render("Saved.", "x")
+    assert "the provider failed" in r.last_problem and "401" in r.last_problem
+
+
+def test_an_invented_number_is_named_in_the_diagnostics():
+    r = Renderer(FakeProvider(text='{"language": "hi-IN", "reply": "munafa ₹9,999"}'))
+    assert r.render("Today's profit is ₹350.", "x")[2][0].startswith("reply_numbers_invented")
+    assert "9999" in r.last_problem

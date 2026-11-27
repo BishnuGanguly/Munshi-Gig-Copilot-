@@ -195,37 +195,70 @@ class Understander:
         return None
 
 
+def parse_render(raw: str) -> tuple[dict | None, str]:
+    """Find the rewording in a model's reply. Returns (object, "") or (None, why-not).
+
+    Models do not always answer with bare JSON: some think aloud first, some wrap it in a code fence, some add
+    a closing remark, and some echo the template. So rather than taking everything between the first `{` and
+    the last `}` (which any stray brace breaks), try to decode a JSON object starting at each `{`, and keep
+    the LAST one that has a real `reply` - a final answer comes after any reasoning or echoed example.
+    """
+    if not (raw or "").strip():
+        return None, "the model returned an empty reply"
+    decoder, found, saw_object = json.JSONDecoder(), None, False
+    for m in re.finditer(r"\{", raw):
+        try:
+            obj, _ = decoder.raw_decode(raw, m.start())
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        saw_object = True
+        reply = obj.get("reply")
+        if isinstance(reply, str) and reply.strip() and not re.fullmatch(r"\s*<[^<>]*>\s*", reply):
+            found = obj                      # not a blank, and not the template's "<the rewritten reply>"
+    if found is not None:
+        return found, ""
+    if saw_object:
+        return None, "found JSON, but with no usable 'reply' field"
+    return None, "no JSON object in the model's reply"
+
+
 class Renderer:
-    """Turns our English reply into the rider's language. Never raises: on any failure the English stands."""
+    """Turns our English reply into the rider's language. Never raises: on any failure the English stands.
+
+    After each call `last_raw` holds what the model said and `last_problem` why it was not used (empty on
+    success), so a failure can be diagnosed instead of guessed at."""
 
     def __init__(self, provider: LlmProvider) -> None:
         self.provider = provider
+        self.last_raw = ""
+        self.last_problem = ""
+
+    def _fail(self, english: str, problem: str, warning: str = "reply_not_rendered"):
+        self.last_problem = problem
+        log.warning("render not used: %s | model said: %r", problem, self.last_raw[:300])
+        return english, DEFAULT_LANGUAGE, [warning]
 
     def render(self, english: str, rider_message: str) -> tuple[str, str, list[str]]:
         """Returns (reply, language_code, warnings)."""
+        self.last_raw = self.last_problem = ""
         try:
-            raw = self.provider.complete(
-                SYSTEM_RENDER, f"The rider wrote: {rider_message}\n\nThe assistant's English reply: {english}")
+            self.last_raw = self.provider.complete(
+                SYSTEM_RENDER, f"The rider wrote: {rider_message}\n\nThe assistant's English reply: {english}") or ""
         except Exception as exc:
-            log.warning("render failed: %s: %s", type(exc).__name__, exc)
-            return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        m = re.search(r"\{.*\}", raw or "", re.S)
-        if not m:
-            return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        try:
-            body = json.loads(m.group(0))
-            reply = str(body["reply"]).strip()
-            language = str(body.get("language") or DEFAULT_LANGUAGE).strip()
-        except (ValueError, KeyError, TypeError):
-            return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
-        if not reply:
-            return english, DEFAULT_LANGUAGE, ["reply_not_rendered"]
+            return self._fail(english, f"the provider failed: {type(exc).__name__}: {exc}")
+        body, problem = parse_render(self.last_raw)
+        if body is None:
+            return self._fail(english, problem)
+        reply = str(body["reply"]).strip()
+        language = str(body.get("language") or DEFAULT_LANGUAGE).strip()
         # The guard: a rewording may not introduce a number our own sentence did not state.
         ours = numbers_in(normalize_digits(english))
         extra = [n for n in numbers_in(normalize_digits(reply)) if n not in ours]
         if extra:
-            log.warning("render invented numbers %s; keeping the English reply", extra)
-            return english, DEFAULT_LANGUAGE, [f"reply_numbers_invented: {', '.join(extra)}"]
+            return self._fail(english, f"the rewording contained numbers we never stated: {', '.join(extra)}",
+                              f"reply_numbers_invented: {', '.join(extra)}")
         return normalize_digits(reply), language, []
 
 
