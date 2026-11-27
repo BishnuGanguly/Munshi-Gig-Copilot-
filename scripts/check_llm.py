@@ -57,6 +57,7 @@ def check(provider) -> bool:
         print(f"  [FAIL] render fell back to English: {warnings}")
         print(f"         why  : {renderer.last_problem}")
         print(f"         model said: {renderer.last_raw[:600]!r}")
+        print(f"         finish_reason={getattr(provider, 'last_finish', None)} usage={getattr(provider, 'last_usage', {})}")
         ok = False
     elif language not in ("hi-Latn", "hi-IN"):
         print(f"  [warn] expected Hinglish for a Hinglish message, got {language!r}")

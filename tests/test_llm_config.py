@@ -198,3 +198,29 @@ def test_check_llm_passes_a_well_behaved_provider_and_fails_a_poor_one(monkeypat
     assert "why  : no JSON object" in out and "model said: 'not json'" in out      # the next run shows the cause
 
     assert check_llm.check(FakeProvider(raises=LlmUnavailableError("401"))) is False
+
+
+# ---------------------------------------------------------------- reasoning configuration
+def test_sarvam_thinks_a_little_to_choose_and_not_at_all_to_reword(monkeypatch):
+    monkeypatch.setenv("BRAIN", "sarvam")
+    assert get_provider().reasoning == {"choose": "low", "complete": "off"}
+
+
+def test_reasoning_can_be_overridden_for_both_calls(monkeypatch):
+    monkeypatch.setenv("BRAIN", "sarvam")
+    monkeypatch.setenv("BRAIN_REASONING_SARVAM", "medium")
+    assert get_provider().reasoning == {"choose": "medium", "complete": "medium"}
+    monkeypatch.setenv("BRAIN_REASONING_SARVAM", "omit")
+    assert get_provider().reasoning == {"choose": "omit", "complete": "omit"}
+
+
+def test_other_providers_send_no_reasoning_field_by_default(monkeypatch):
+    for name in ("openai", "groq", "openrouter", "ollama"):
+        assert build_provider(name).reasoning == {}
+
+
+def test_the_interface_defaults_leave_room_to_think():
+    import inspect
+    from app.llm.base import LlmProvider
+    assert inspect.signature(LlmProvider.choose_actions).parameters["max_tokens"].default == 4096
+    assert inspect.signature(LlmProvider.complete).parameters["max_tokens"].default == 2048

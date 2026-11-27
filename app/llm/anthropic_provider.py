@@ -40,7 +40,7 @@ class AnthropicProvider:
         except Exception as exc:                  # network, auth, rate limit: all mean "unavailable"
             raise LlmUnavailableError(f"Anthropic call failed: {type(exc).__name__}: {exc}") from exc
 
-    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 1024) -> list[ToolCall]:
+    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 4096) -> list[ToolCall]:
         response = self._create(max_tokens=max_tokens, system=self._system(system), tools=tools,
                                 tool_choice={"type": "auto"}, messages=[{"role": "user", "content": user}])
         if getattr(response, "stop_reason", None) == "refusal":
@@ -51,7 +51,7 @@ class AnthropicProvider:
                  getattr(getattr(response, "usage", None), "cache_read_input_tokens", None))
         return calls
 
-    def complete(self, system: str, user: str, max_tokens: int = 512) -> str:
+    def complete(self, system: str, user: str, max_tokens: int = 2048) -> str:
         response = self._create(max_tokens=max_tokens, system=self._system(system),
                                 messages=[{"role": "user", "content": user}])
         if getattr(response, "stop_reason", None) == "refusal":

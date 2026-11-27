@@ -78,8 +78,16 @@ class OpenAICompatProvider:
     Sarvam's `api-subscription-key` does), or "none" (a local server)."""
 
     def __init__(self, name: str, base_url: str, model: str, api_key: str | None = None, auth: str = "bearer",
-                 retries: int = 2, timeout: float = 30.0, transport: httpx.BaseTransport | None = None) -> None:
+                 retries: int = 2, timeout: float = 30.0, transport: httpx.BaseTransport | None = None,
+                 reasoning: dict | None = None) -> None:
+        """`reasoning` sets `reasoning_effort` per kind of call, e.g. {"choose": "low", "complete": "off"}.
+        A value is low / medium / high, "off" (sent as null, which turns thinking off) or "omit" (not sent).
+        Omitted by default, so providers without the field are unaffected."""
         self.name = name
+        self.reasoning = dict(reasoning or {})
+        self._reasoning_rejected = False
+        self.last_finish: str | None = None
+        self.last_usage: dict = {}
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.model, self.api_key, self.auth, self.retries = model, api_key or "", auth, retries
         self.client = httpx.Client(timeout=timeout, transport=transport)
@@ -94,6 +102,12 @@ class OpenAICompatProvider:
         if self.auth.startswith("header:"):
             return {self.auth.split(":", 1)[1]: self.api_key}
         raise LlmUnavailableError(f"{self.name}: unknown auth style {self.auth!r}")
+
+    def _reasoning_field(self, kind: str) -> dict:
+        value = self.reasoning.get(kind, "omit")
+        if self._reasoning_rejected or value in (None, "omit", ""):
+            return {}
+        return {"reasoning_effort": None if value == "off" else value}
 
     def _post(self, body: dict) -> dict:
         headers = self._headers()
@@ -111,6 +125,11 @@ class OpenAICompatProvider:
                         raise LlmUnavailableError(f"{self.name}: non-JSON response: {resp.text[:200]!r}")
                 if resp.status_code in (401, 403):
                     raise LlmUnavailableError(f"{self.name} rejected the API key (HTTP {resp.status_code}).")
+                if resp.status_code in (400, 422) and "reasoning_effort" in body:
+                    # A provider that does not know the field. Drop it for good and try once more.
+                    log.warning("%s rejected reasoning_effort (%s); not sending it again", self.name, resp.text[:160])
+                    self._reasoning_rejected = True
+                    return self._post({k: v for k, v in body.items() if k != "reasoning_effort"})
                 if resp.status_code in (400, 404, 422):
                     raise LlmUnavailableError(f"{self.name} rejected the request (HTTP {resp.status_code}): "
                                               f"{resp.text[:300]}")
@@ -119,19 +138,31 @@ class OpenAICompatProvider:
                 time.sleep(0.5 * 2 ** attempt)
         raise LlmUnavailableError(f"{self.name} failed after {self.retries + 1} attempts: {last}")
 
-    @staticmethod
-    def _message(data: dict) -> dict:
+    def _message(self, data: dict) -> dict:
         try:
-            return data["choices"][0]["message"] or {}
+            choice = data["choices"][0]
+            message = choice["message"] or {}
         except (KeyError, IndexError, TypeError):
             raise LlmUnavailableError(f"unexpected response shape: {str(data)[:200]}")
+        self.last_finish = choice.get("finish_reason")
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        self.last_usage = usage
+        log.info("%s finish=%s usage=%s", self.name, self.last_finish, usage)
+        return message
 
-    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 1024) -> list[ToolCall]:
+    def _ran_dry(self) -> LlmUnavailableError:
+        return LlmUnavailableError(
+            f"{self.name} stopped at the token limit before it answered (finish_reason=length, usage={self.last_usage}). "
+            f"It is probably a reasoning model that spent the budget thinking: lower its reasoning effort "
+            f"(BRAIN_REASONING_{self.name.upper()}) or raise max_tokens.")
+
+    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 4096) -> list[ToolCall]:
         data = self._post({"model": self.model, "max_tokens": max_tokens, "tools": to_openai_tools(tools),
-                           "tool_choice": "auto",
+                           "tool_choice": "auto", **self._reasoning_field("choose"),
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+        message = self._message(data)
         calls: list[ToolCall] = []
-        for tc in self._message(data).get("tool_calls") or []:
+        for tc in message.get("tool_calls") or []:
             fn = (tc or {}).get("function") or {}
             name, raw = fn.get("name"), fn.get("arguments")
             if not name:
@@ -148,9 +179,14 @@ class OpenAICompatProvider:
                     continue                                 # an unusable call is no call
             calls.append(ToolCall(name, args))
         log.info("%s model=%s calls=%s", self.name, self.model, [c.name for c in calls])
+        if not calls and self.last_finish == "length":
+            raise self._ran_dry()                      # truncated, not "chose nothing": a fallback may do better
         return calls
 
-    def complete(self, system: str, user: str, max_tokens: int = 512) -> str:
-        data = self._post({"model": self.model, "max_tokens": max_tokens,
+    def complete(self, system: str, user: str, max_tokens: int = 2048) -> str:
+        data = self._post({"model": self.model, "max_tokens": max_tokens, **self._reasoning_field("complete"),
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
-        return strip_reasoning(_text_of(self._message(data).get("content")))
+        text = strip_reasoning(_text_of(self._message(data).get("content")))
+        if not text and self.last_finish == "length":
+            raise self._ran_dry()
+        return text

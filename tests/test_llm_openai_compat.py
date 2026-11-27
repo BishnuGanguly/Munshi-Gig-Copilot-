@@ -201,3 +201,108 @@ def test_registry_still_validates_against_the_original_schema():
     from app.core.registry import validate_args
     entry_schema = REGISTRY.get("log_entries").input_schema
     assert validate_args(entry_schema, {"entries": [{"amount": 5, "platform": None}]}) == []
+
+
+# ---------------------------------------------------------------- reasoning models (found live: sarvam-105b)
+def body_of(handler_capture):
+    return handler_capture[-1]
+
+
+def capturing(response):
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return response() if callable(response) else response
+
+    return handler, seen
+
+
+def thinking_model(**kw):
+    return OpenAICompatProvider("sarvam", "https://api.sarvam.ai/v1", "sarvam-105b", api_key="k",
+                                auth="header:api-subscription-key", retries=0, **kw)
+
+
+def test_the_exact_live_failure_is_now_explained_not_silent():
+    """Reproduces the first live run: the reasoning spent the whole budget, so `content` came back empty and
+    finish_reason was `length`. It used to look like a model that said nothing; now it names the cause."""
+    body = {"choices": [{"message": {"role": "assistant", "content": "", "reasoning_content": "Let me think..."},
+                         "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 430, "completion_tokens": 512}}
+    p = OpenAICompatProvider("sarvam", "https://api.sarvam.ai/v1", "sarvam-105b", api_key="k", retries=0,
+                             auth="header:api-subscription-key",
+                             transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    with pytest.raises(LlmUnavailableError, match="token limit.*reasoning model.*BRAIN_REASONING_SARVAM"):
+        p.complete("s", "u")
+    assert p.last_finish == "length" and p.last_usage["completion_tokens"] == 512
+
+
+def test_running_dry_while_choosing_is_not_the_same_as_choosing_nothing():
+    """A truncated reply is a failure (a fallback may do better); a model that simply chose no action is not."""
+    dry = {"choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+    quiet = {"choices": [{"message": {"content": "no tool needed"}, "finish_reason": "stop"}]}
+    with pytest.raises(LlmUnavailableError, match="token limit"):
+        provider(lambda r: httpx.Response(200, json=dry)).choose_actions("s", TOOLS, "u")
+    assert provider(lambda r: httpx.Response(200, json=quiet)).choose_actions("s", TOOLS, "u") == []
+
+
+def test_a_truncated_reply_that_still_has_text_is_kept():
+    body = {"choices": [{"message": {"content": "partial but usable"}, "finish_reason": "length"}]}
+    assert provider(lambda r: httpx.Response(200, json=body)).complete("s", "u") == "partial but usable"
+
+
+def test_the_budgets_leave_room_to_think_and_answer():
+    handler, seen = capturing(lambda: reply({"content": "x", "tool_calls": [tool_call("help", "{}")]}))
+    p = provider(handler)
+    p.choose_actions("s", TOOLS, "u")
+    p.complete("s", "u")
+    assert seen[0]["max_tokens"] == 4096 and seen[1]["max_tokens"] == 2048     # the old 1024 / 512 ran dry
+
+
+def test_reasoning_effort_is_sent_per_kind_of_call():
+    handler, seen = capturing(lambda: reply({"content": "x", "tool_calls": [tool_call("help", "{}")]}))
+    p = thinking_model(transport=httpx.MockTransport(handler), reasoning={"choose": "low", "complete": "off"})
+    p.choose_actions("s", TOOLS, "u")
+    p.complete("s", "u")
+    assert seen[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" in seen[1] and seen[1]["reasoning_effort"] is None      # JSON null = thinking off
+
+
+@pytest.mark.parametrize("setting", [None, "omit", ""])
+def test_by_default_nothing_extra_is_sent(setting):
+    """Providers that do not know the field must be unaffected."""
+    handler, seen = capturing(reply({"content": "x"}))
+    p = thinking_model(transport=httpx.MockTransport(handler), reasoning={"complete": setting} if setting is not None else {})
+    p.complete("s", "u")
+    assert "reasoning_effort" not in seen[0]
+
+
+def test_a_provider_that_rejects_the_field_is_retried_without_it_and_remembered():
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if "reasoning_effort" in body:
+            return httpx.Response(422, text="unknown field reasoning_effort")
+        return reply({"content": "fine"})
+
+    p = thinking_model(transport=httpx.MockTransport(handler), reasoning={"complete": "off"})
+    assert p.complete("s", "u") == "fine"
+    assert "reasoning_effort" in calls[0] and "reasoning_effort" not in calls[1]
+    assert p.complete("s", "u") == "fine"
+    assert "reasoning_effort" not in calls[2]                                  # not sent again
+
+
+def test_a_genuine_400_without_the_field_is_still_an_error():
+    handler, _ = capturing(httpx.Response(400, text="bad tool schema"))
+    with pytest.raises(LlmUnavailableError, match="rejected the request"):
+        provider(handler).complete("s", "u")
+
+
+def test_usage_is_recorded_for_diagnosis():
+    body = {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 40, "reasoning_tokens": 12}}
+    p = provider(lambda r: httpx.Response(200, json=body))
+    p.complete("s", "u")
+    assert p.last_finish == "stop" and p.last_usage == {"completion_tokens": 40, "reasoning_tokens": 12}

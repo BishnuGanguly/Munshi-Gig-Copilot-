@@ -1,5 +1,9 @@
 """The one interface the rest of the app knows about. No vendor names, no vendor request shapes.
 
+Token budgets are generous on purpose: a reasoning model spends part of `max_tokens` thinking, and a small
+budget leaves it with nothing to say (an empty reply). Real output here is tens of tokens, so unused
+headroom costs nothing.
+
 A provider does exactly two things:
   * `choose_actions`  - given tools, say which to call and with what arguments;
   * `complete`        - turn a prompt into text.
@@ -20,11 +24,11 @@ class ToolCall:
 class LlmProvider(Protocol):
     name: str
 
-    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 1024) -> list[ToolCall]:
+    def choose_actions(self, system: str, tools: list[dict], user: str, max_tokens: int = 4096) -> list[ToolCall]:
         """`tools` are neutral definitions: {"name", "description", "input_schema"}. Returns the calls the
         model chose - possibly none. Raises LlmUnavailableError when the provider itself failed."""
         ...
 
-    def complete(self, system: str, user: str, max_tokens: int = 512) -> str:
+    def complete(self, system: str, user: str, max_tokens: int = 2048) -> str:
         """Plain text out. Raises LlmUnavailableError when the provider itself failed."""
         ...

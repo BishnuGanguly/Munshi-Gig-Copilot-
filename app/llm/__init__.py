@@ -26,12 +26,16 @@ class Preset:
     key_env: str          # the environment variable holding the key
     auth: str             # bearer | header:<Name> | none
     model: str            # default model
+    reasoning: tuple = () # (("choose", "low"), ("complete", "off")): reasoning_effort per kind of call
 
 
 # From Sarvam's docs, as surfaced by search (not opened directly): POST /v1/chat/completions, the key in an
 # `api-subscription-key` header, `sarvam-105b` (sarvam-m is deprecated). The others use the standard protocol.
 PRESETS: dict[str, Preset] = {
-    "sarvam": Preset("https://api.sarvam.ai/v1", "SARVAM_API_KEY", "header:api-subscription-key", "sarvam-105b"),
+    # sarvam-105b reasons by default and its reasoning tokens count against max_tokens. Choosing an action gets
+    # a little thinking; rewording a sentence gets none (null turns thinking off, per Sarvam's docs).
+    "sarvam": Preset("https://api.sarvam.ai/v1", "SARVAM_API_KEY", "header:api-subscription-key", "sarvam-105b",
+                     (("choose", "low"), ("complete", "off"))),
     "openai": Preset("https://api.openai.com/v1", "OPENAI_API_KEY", "bearer", "gpt-4.1-mini"),
     "groq": Preset("https://api.groq.com/openai/v1", "GROQ_API_KEY", "bearer", "llama-3.3-70b-versatile"),
     "openrouter": Preset("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "bearer", "openai/gpt-4.1-mini"),
@@ -63,15 +67,20 @@ def build_provider(name: str, primary: bool = True) -> LlmProvider:
                                     os.getenv("BRAIN_AUTH", "bearer"))
     if name in PRESETS:
         p = PRESETS[name]
+        reasoning = dict(p.reasoning)
+        override = os.getenv(f"BRAIN_REASONING_{name.upper()}")      # low | medium | high | off | omit, both calls
+        if override:
+            reasoning = {"choose": override, "complete": override}
         return OpenAICompatProvider(name, os.getenv(f"BRAIN_BASE_URL_{name.upper()}") or p.base_url,
-                                    _model_for(name, p.model, primary), os.getenv(p.key_env), p.auth)
+                                    _model_for(name, p.model, primary), os.getenv(p.key_env), p.auth,
+                                    reasoning=reasoning)
     raise ValueError(f"Unknown BRAIN provider {name!r}. Choose from: none, {', '.join(KNOWN)}")
 
 
 def _config_key() -> tuple:
     names = ("BRAIN", "BRAIN_MODEL", "BRAIN_BASE_URL", "BRAIN_API_KEY_ENV", "BRAIN_AUTH")
     extra = tuple(sorted((k, v) for k, v in os.environ.items()
-                         if k.startswith(("BRAIN_MODEL_", "BRAIN_BASE_URL_")) or k.endswith("_API_KEY")))
+                         if k.startswith(("BRAIN_MODEL_", "BRAIN_BASE_URL_", "BRAIN_REASONING_")) or k.endswith("_API_KEY")))
     return tuple(os.getenv(n) for n in names) + extra
 
 
