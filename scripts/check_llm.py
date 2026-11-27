@@ -64,6 +64,10 @@ def check(provider) -> bool:
             print("         the provider's whole reply:")
             print("         " + json.dumps(raw, ensure_ascii=False)[:1800])
         ok = False
+    elif reply.strip() == english.strip():
+        print("  [FAIL] the reply came back word for word in English: the rider wrote Hinglish, so a label of "
+              f"{language!r} on unchanged English is not a rewording")
+        ok = False
     elif language not in ("hi-Latn", "hi-IN"):
         print(f"  [warn] expected Hinglish for a Hinglish message, got {language!r}")
     else:

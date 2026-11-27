@@ -226,3 +226,19 @@ def test_the_interface_defaults_leave_room_to_think():
     from app.llm.base import LlmProvider
     assert inspect.signature(LlmProvider.choose_actions).parameters["max_tokens"].default == 4096
     assert inspect.signature(LlmProvider.complete).parameters["max_tokens"].default == 2048
+
+
+def test_check_llm_does_not_pass_english_that_was_only_relabelled(capsys):
+    """Regression: the live check passed a reply that was our English sentence verbatim, labelled hi-Latn, because
+    it checked only the language label. A rider would have read English."""
+    import importlib.util, json
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("check_llm2", Path(__file__).parent.parent / "scripts" / "check_llm.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    english = "Please confirm: income ₹1,400 from Swiggy; expense ₹250 on fuel. Is that correct?"
+    lazy = FakeProvider(turns=[[("log_entries", {"entries": [
+        {"type": "income", "amount": 1400, "platform": "Swiggy"}, {"type": "expense", "amount": 250, "category": "fuel"}]})]],
+        text=json.dumps({"language": "hi-Latn", "reply": english}))
+    assert mod.check(lazy) is False
+    assert "word for word in English" in capsys.readouterr().out
