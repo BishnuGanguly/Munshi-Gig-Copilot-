@@ -116,10 +116,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.commit()
 
 
-def ensure_user(conn: sqlite3.Connection, user_id: str, language: str | None = None) -> None:
+def ensure_user(conn: sqlite3.Connection, user_id: str) -> None:
     conn.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
-    if language:
-        conn.execute("UPDATE users SET last_language = ? WHERE id = ?", (language, user_id))
     conn.commit()
 
 

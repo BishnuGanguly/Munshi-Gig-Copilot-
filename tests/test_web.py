@@ -60,17 +60,19 @@ def test_status_names_a_provider_whose_key_is_missing(monkeypatch):
 
 def test_status_when_configured_and_never_leaks_a_key(monkeypatch):
     secret = "sk_live_DO_NOT_LEAK_1234567890"
-    for k, v in {"BRAIN": "sarvam,anthropic", "SARVAM_API_KEY": secret, "ANTHROPIC_API_KEY": secret + "x",
-                 "STT_PROVIDER": "sarvam", "TTS_PROVIDER": "sarvam"}.items():
+    for k, v in {"BRAIN": "sarvam", "SARVAM_API_KEY": secret, "STT_PROVIDER": "sarvam", "TTS_PROVIDER": "sarvam"}.items():
         monkeypatch.setenv(k, v)
     r = client().get("/status")
-    assert r.json()["model"] == {"provider": "sarvam,anthropic", "ready": True, "message": "Model: sarvam, anthropic."}
+    assert r.json()["model"] == {"provider": "sarvam", "ready": True, "message": "Model: sarvam."}
     assert r.json()["speech_to_text"]["ready"] and r.json()["voice"]["ready"]
     assert secret not in r.text and "sk_" not in r.text
 
 
-def test_ollama_needs_no_key_to_be_ready(monkeypatch):
-    monkeypatch.setenv("BRAIN", "ollama")
+def test_a_keyless_local_server_is_ready(monkeypatch):
+    monkeypatch.setenv("BRAIN", "openai_compat")
+    monkeypatch.setenv("BRAIN_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("BRAIN_AUTH", "none")
+    monkeypatch.setenv("BRAIN_MODEL_OPENAI_COMPAT", "llama3.1")
     assert client().get("/status").json()["model"]["ready"] is True
 
 
@@ -118,5 +120,5 @@ def test_the_image_pins_its_tools():
 
 def test_every_documented_variable_is_passed_through():
     env = compose()["services"]["munshi"]["environment"]
-    for name in ("BRAIN", "SARVAM_API_KEY", "ANTHROPIC_API_KEY", "STT_PROVIDER", "TTS_PROVIDER"):
+    for name in ("BRAIN", "SARVAM_API_KEY", "STT_PROVIDER", "TTS_PROVIDER"):
         assert name in env

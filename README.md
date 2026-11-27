@@ -7,7 +7,7 @@ it back for confirmation, and answers questions about their own money. Riders ne
 detected per message and the reply comes back in the same one.
 
 **Status: a working prototype.** A backend plus a web page to talk to it, started with one Docker command.
-The WhatsApp channel comes later and plugs in on top of `POST /process`. 517 tests pass. See
+The WhatsApp channel comes later and plugs in on top of `POST /process`. 544 tests pass. See
 [What is and isn't verified](#what-is-and-isnt-verified) before trusting any provider-facing part.
 
 ```bash
@@ -62,7 +62,7 @@ appear as text, and as a voice note when you spoke. A banner at the top says whi
 ```bash
 uv sync                                          # creates .venv; ffmpeg comes bundled
 uv run uvicorn app.main:app --port 3000          # then open http://localhost:3000
-uv run pytest -q                                 # 517 passed
+uv run pytest -q                                 # 544 passed
 ```
 
 **What works with no keys.** Everything starts and the page works. Speech and voice fall back to **mocks**
@@ -73,7 +73,7 @@ model key is not set". Yes and no still work, because they never reach the model
 **With keys.** Copy `.env.example` to `.env` (Docker Compose reads it automatically) and set:
 
 ```
-BRAIN=sarvam,anthropic       # Sarvam first; Claude only if Sarvam is down (see "Model providers")
+BRAIN=sarvam                 # the model (see "Model providers")
 STT_PROVIDER=sarvam
 TTS_PROVIDER=sarvam
 SARVAM_API_KEY=...           # one key serves speech, voice and the model
@@ -156,27 +156,24 @@ swappable, and chainable.
 
 ```
 BRAIN=sarvam                one provider
-BRAIN=sarvam,anthropic      a chain: the next answers only when the one before it is down
+BRAIN=sarvam,openai_compat  a chain: the next answers only when the one before it is down
 ```
 
 | Name | Speaks | Notes |
 |---|---|---|
 | `sarvam` | OpenAI-style | India-hosted, billed in rupees; reuses `SARVAM_API_KEY`. Default model `sarvam-105b` |
-| `anthropic` | Anthropic SDK | Claude; prompt caching, low effort. Key, or `ant auth login`. `uv sync --extra llm` |
-| `openai`, `groq`, `openrouter`, `ollama` | OpenAI-style | presets; Ollama needs no key |
-| `openai_compat` | OpenAI-style | anything else: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH`, a model |
+| `openai_compat` | OpenAI-style | any other server speaking that protocol (a local model included): `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH`, a model |
 
-Adding a provider that speaks the OpenAI protocol is one entry in `PRESETS`; one with its own protocol is a
-class implementing the interface. Models and URLs are per-provider (`BRAIN_MODEL_<NAME>`,
+The plan is Sarvam for everything (speech, voice, model). The generic `openai_compat` entry and the chain are
+kept because they are small; a provider with its own protocol is a class implementing the interface. Models and URLs are per-provider (`BRAIN_MODEL_<NAME>`,
 `BRAIN_BASE_URL_<NAME>`); `BRAIN_MODEL` is shorthand for the first provider's model.
 
 What the adapters absorb, so the rest of the code never sees it:
 
 - **Tool-call shape.** Our neutral `{name, description, input_schema}` becomes `{"type":"function",
-  "function":{..., "parameters"}}` for OpenAI-style providers, and the reply's `arguments` — a JSON
-  *string* there, a dict for Claude — is parsed. Malformed arguments are "no call", never a crash.
+  "function":{..., "parameters"}}`, and the reply's `arguments` — often a JSON *string* — is parsed. Malformed arguments are "no call", never a crash.
 - **Schema dialect.** Our schemas allow `null` on optional fields; strict providers reject that, so
-  OpenAI-style providers are sent a simplified schema. Validation still runs against the original.
+  providers are sent a simplified schema. Validation still runs against the original.
 - **Reasoning leaks.** A `<think>…</think>` block in a reply is stripped; a reply cut off mid-thought is
   treated as empty.
 - **Parallel tool calls** cannot be switched off on every model, so the app caps them itself.
@@ -187,9 +184,8 @@ What the adapters absorb, so the rest of the code never sees it:
 
 A misspelt provider name stops the app at startup, not on the first rider's message.
 
-`tests/test_llm_equivalence.py` replays the same scenarios through the Anthropic and the OpenAI-style
-adapter, each with its own response shape, and asserts the outcomes are identical — including that the same
-guards refuse the same bad calls.
+`tests/test_llm_failover.py` replays an outage end to end (first provider down, second answers; all down;
+the same guards whoever answered).
 
 ### What the model is and isn't trusted with
 
@@ -213,7 +209,7 @@ It **chooses actions**; it never sees or writes the database, and it never state
   `actions_json`.
 - **Cost:** about 1,600 input and 85 output tokens per message across both calls, of which roughly 1,500
   is the fixed prefix. That is on the order of **₹5 per active rider per month** at 10 messages a day on
-  either Claude Haiku or Sarvam's reported rates — so choose a provider by how well it understands
+  Sarvam's reported rates — so choose a provider by how well it understands
   Hinglish, not by price. The Sarvam rates are unconfirmed (see below). **Every message needs a
   round-trip**: there is no free offline path.
 
@@ -362,14 +358,13 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 |---|---|
 | **Speech-to-text** | `STT_PROVIDER` (`mock`/`sarvam`/`faster_whisper`), `STT_FALLBACK`, `STT_MIN_CONFIDENCE`, `SARVAM_API_KEY`, `SARVAM_MODEL`, `SARVAM_LANGUAGE_CODE`, `SARVAM_MODE`, `WHISPER_MODEL` |
 | **Voice replies** | `TTS_PROVIDER` (`mock`/`sarvam`), `SARVAM_TTS_MODEL`, `SARVAM_TTS_SPEAKER`, `VOICE_MAX_CHARS` |
-| **The model** | `BRAIN` (a provider, or a comma-separated chain), `BRAIN_MAX_ACTIONS`, `BRAIN_MODEL`, `BRAIN_MODEL_<NAME>`, `BRAIN_BASE_URL_<NAME>`, `ANTHROPIC_API_KEY`; for `openai_compat`: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH` |
+| **The model** | `BRAIN` (a provider, or a comma-separated chain), `BRAIN_MAX_ACTIONS`, `BRAIN_MODEL`, `BRAIN_MODEL_<NAME>`, `BRAIN_BASE_URL_<NAME>`, `BRAIN_REASONING_<NAME>`; for `openai_compat`: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH` |
 | **Audio** | `MAX_AUDIO_SECONDS`, `SILENCE_RMS_THRESHOLD`, `FFMPEG_BIN` |
 | **App** | `DB_PATH`, `LOG_LEVEL` |
 
 ffmpeg ships with the install (`imageio-ffmpeg`), so no system install is needed; `FFMPEG_BIN` overrides it.
 The Docker image uses Debian's ffmpeg instead, so it also runs on arm64 (Apple Silicon).
-Optional extras: `uv sync --extra llm` (the Claude SDK, only needed for `anthropic`; included in the Docker
-image) and `uv sync --extra whisper` (offline speech-to-text). Dependencies are declared in `pyproject.toml`
+Optional extra: `uv sync --extra whisper` (offline speech-to-text). Dependencies are declared in `pyproject.toml`
 and locked in `uv.lock`.
 
 ## What is and isn't verified
@@ -377,7 +372,7 @@ and locked in `uv.lock`.
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 517 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+**Covered by the 544 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
 action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, the
 model-facing code against fake clients (including output that invents numbers or tries to act for another
 rider), the evaluation scorer, the web page and status endpoint (including that no key ever appears in
@@ -389,17 +384,14 @@ scroll on a phone and no console errors. The Docker image's steps were replayed 
 files, the same locked install on Python 3.11 and the same environment and no `.env`; that started and
 served every page.
 
-**Not verified:** the Docker image itself has not been built (no Docker daemon was available), and nothing
-below has ever had a live call.
+**Verified live by the author:** Sarvam speech-to-text, and Sarvam's chat model choosing an action and
+rewording a reply (`scripts/check_llm.py` passes).
 
-**Not verified — no live call has ever been made:**
+**Not verified:** the Docker image itself has not been built (no Docker daemon was available here).
 
-- **Any model provider.** Nothing here has ever spoken to a model. The Claude request shape is checked against
-  the installed SDK (2.13.0); the Sarvam chat API's endpoint (`/v1/chat/completions`), auth header
-  (`api-subscription-key`), model (`sarvam-105b`; `sarvam-m` is deprecated) and stringified tool-call
-  arguments come from its docs as surfaced by search, which could not be opened directly. Its price is
-  reported inconsistently (₹10/₹25 or ₹15/₹60 per million tokens) and `parallel_tool_calls: false` is
-  reported as *not* enforced on `sarvam-105b`. **Run `scripts/check_llm.py` first.**
+- **Sarvam's price and parallel tool calls.** The price is reported inconsistently (₹10/₹25 or ₹15/₹60 per
+  million tokens) and `parallel_tool_calls: false` is reported as *not* enforced on `sarvam-105b`; the app
+  caps tool calls itself.
 - **How well any model reads Hinglish and picks among seven tools.** The adapters are tested; the models are
   not. `scripts/evaluate.py` is built for exactly this and has never been run against a model.
 - **Sarvam text-to-speech.** Whether the language field is `target_language_code` or `language_code` is
@@ -433,7 +425,7 @@ app/
   evaluation.py        scores the pipeline against labelled transcripts
   audio/               ffmpeg clean-up, validation, voice-note encoding
   stt/                 interface + sarvam, whisper_local, mock
-  llm/                 the provider interface; anthropic, openai_compat (+ presets), fallback chain
+  llm/                 the provider interface; openai_compat (+ the sarvam preset), fallback chain
   text/                numbers (spoken amounts → digits), normalize, chunk
   tts/                 service + sarvam, mock
   core/
@@ -446,7 +438,7 @@ app/
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
 scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm, evaluate
-tests/                 517 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
+tests/                 544 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
 Dockerfile             Python 3.11 + ffmpeg + locked dependencies; serves port 3000 as a non-root user
 docker-compose.yml     one command to start it; every variable has a default, no .env needed
 ```
@@ -457,6 +449,6 @@ Built in order: a FastAPI scaffold with mocks; audio input and speech-to-text; a
 rule-based English core; voice replies; the action registry, migrations and the daily target; an LLM
 understanding layer beside the rules; then — once measurement showed the rules could not answer questions
 in regional languages at all — the translation chain and the regexes were deleted and the model took over
-understanding; the model was then put behind a provider interface (Sarvam, Claude, any OpenAI-style
+understanding; the model was then put behind a provider interface (Sarvam, or any OpenAI-style
 provider, with failover); finally an evaluation harness, the web page and the Docker setup. `git log` has the
 detail.

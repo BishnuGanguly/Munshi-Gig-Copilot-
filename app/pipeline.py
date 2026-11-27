@@ -97,7 +97,6 @@ def process(conn, user_id: str, audio: bytes | None = None, filename: str | None
             warnings += w
 
     total_ms = int((time.perf_counter() - t0) * 1000)
-    db.ensure_user(conn, user_id, language)
     db.log_message(conn, user_id, transcript=transcript, detected_language=language,
                    normalized_text=result.normalized_text, reply_english=outcome.reply,
                    reply_user_language=result.reply_user, latency_ms=total_ms, intent=outcome.intent,

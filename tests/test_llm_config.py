@@ -3,13 +3,20 @@ import pytest
 
 from app.errors import LlmUnavailableError
 from app.llm import FallbackLlm, KNOWN, PRESETS, build_provider, get_provider
-from app.llm.anthropic_provider import AnthropicProvider
 from app.llm.openai_compat import OpenAICompatProvider
 from app.llm.base import ToolCall
 from tests.fakes import FakeProvider
 
 
 # ---------------------------------------------------------------- configuration
+def second_provider(monkeypatch, model="their-model"):
+    """A second provider for chain tests: any OpenAI-style server, configured purely by environment."""
+    monkeypatch.setenv("BRAIN_BASE_URL", "https://other.example.com/v1")
+    monkeypatch.setenv("BRAIN_API_KEY_ENV", "OTHER_KEY")
+    monkeypatch.setenv("OTHER_KEY", "other-secret")
+    monkeypatch.setenv("BRAIN_MODEL_OPENAI_COMPAT", model)
+
+
 def test_off_by_default():
     assert get_provider() is None
 
@@ -29,10 +36,11 @@ def test_one_provider(monkeypatch):
 
 
 def test_a_chain_preserves_order(monkeypatch):
-    monkeypatch.setenv("BRAIN", "sarvam, anthropic")
+    second_provider(monkeypatch)
+    monkeypatch.setenv("BRAIN", "sarvam, openai_compat")
     p = get_provider()
-    assert isinstance(p, FallbackLlm) and [x.name for x in p.providers] == ["sarvam", "anthropic"]
-    assert isinstance(p.providers[1], AnthropicProvider)
+    assert isinstance(p, FallbackLlm) and [x.name for x in p.providers] == ["sarvam", "openai_compat"]
+    assert isinstance(p.providers[1], OpenAICompatProvider) and p.providers[1].url.startswith("https://other.example.com")
 
 
 def test_the_sarvam_key_is_the_one_used_for_speech(monkeypatch):
@@ -50,26 +58,27 @@ def test_providers_are_cached_while_config_is_unchanged(monkeypatch):
 
 def test_an_unknown_provider_fails_loudly_and_names_the_choices(monkeypatch):
     monkeypatch.setenv("BRAIN", "skynet")
-    with pytest.raises(ValueError, match="Unknown BRAIN provider 'skynet'.*anthropic"):
+    with pytest.raises(ValueError, match="Unknown BRAIN provider 'skynet'.*sarvam"):
         get_provider()
 
 
 # ---------------------------------------------------------------- models and URLs
 def test_model_override_precedence(monkeypatch):
-    monkeypatch.setenv("BRAIN", "sarvam,anthropic")
+    second_provider(monkeypatch, model="second-model")
+    monkeypatch.setenv("BRAIN", "sarvam,openai_compat")
     monkeypatch.setenv("BRAIN_MODEL", "first-model")
-    monkeypatch.setenv("BRAIN_MODEL_ANTHROPIC", "claude-sonnet-5-5")
     a, b = get_provider().providers
     assert a.model == "first-model"                        # BRAIN_MODEL is shorthand for the FIRST provider
-    assert b.model == "claude-sonnet-5-5"                  # the second does not inherit it
+    assert b.model == "second-model"                       # the second does not inherit it
     monkeypatch.setenv("BRAIN_MODEL_SARVAM", "sarvam-special")
     assert get_provider().providers[0].model == "sarvam-special"   # the specific one wins
 
 
 def test_a_shared_model_name_is_not_forced_on_the_fallback(monkeypatch):
-    monkeypatch.setenv("BRAIN", "sarvam,anthropic")
+    second_provider(monkeypatch, model="their-model")
+    monkeypatch.setenv("BRAIN", "sarvam,openai_compat")
     monkeypatch.setenv("BRAIN_MODEL", "sarvam-105b")
-    assert get_provider().providers[1].model == "claude-haiku-5-5"
+    assert get_provider().providers[1].model == "their-model"
 
 
 def test_base_url_can_be_overridden_per_provider(monkeypatch):
@@ -79,11 +88,10 @@ def test_base_url_can_be_overridden_per_provider(monkeypatch):
 
 
 # ---------------------------------------------------------------- any other OpenAI-style provider
-def test_every_preset_builds_without_a_key():
+def test_the_sarvam_preset_builds_without_a_key():
     """Building is cheap and contacts nothing: a missing key is only an error when a call is made."""
-    for name in PRESETS:
-        assert build_provider(name).name == name
-    assert set(PRESETS) <= set(KNOWN) and "anthropic" in KNOWN and "openai_compat" in KNOWN
+    assert build_provider("sarvam").name == "sarvam" and set(PRESETS) == {"sarvam"}
+    assert KNOWN == ["openai_compat", "sarvam"]
 
 
 def test_generic_openai_compatible_provider(monkeypatch):
@@ -109,8 +117,12 @@ def test_generic_provider_says_what_is_missing(monkeypatch, missing):
         build_provider("openai_compat")
 
 
-def test_local_ollama_needs_no_key():
-    p = build_provider("ollama")
+def test_a_local_server_needs_no_key(monkeypatch):
+    """Any OpenAI-style server, with no auth, covers a model running on the same machine."""
+    monkeypatch.setenv("BRAIN_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("BRAIN_AUTH", "none")
+    monkeypatch.setenv("BRAIN_MODEL_OPENAI_COMPAT", "llama3.1")
+    p = build_provider("openai_compat")
     assert p.auth == "none" and p.url == "http://localhost:11434/v1/chat/completions"
 
 
@@ -141,8 +153,8 @@ def test_no_action_is_not_a_failure_so_the_fallback_is_not_asked():
 
 
 def test_when_every_provider_is_down_the_errors_are_all_reported():
-    chain = FallbackLlm([down("sarvam is down"), down("claude is down")])
-    with pytest.raises(LlmUnavailableError, match="sarvam is down.*claude is down"):
+    chain = FallbackLlm([down("sarvam is down"), down("the second is down")])
+    with pytest.raises(LlmUnavailableError, match="sarvam is down.*the second is down"):
         chain.complete("s", "u")
 
 
@@ -216,9 +228,9 @@ def test_reasoning_can_be_overridden_for_both_calls(monkeypatch):
     assert get_provider().reasoning == {"choose": "omit", "complete": "omit"}
 
 
-def test_other_providers_send_no_reasoning_field_by_default(monkeypatch):
-    for name in ("openai", "groq", "openrouter", "ollama"):
-        assert build_provider(name).reasoning == {}
+def test_a_generic_provider_sends_no_reasoning_field_by_default(monkeypatch):
+    second_provider(monkeypatch)
+    assert build_provider("openai_compat").reasoning == {}
 
 
 def test_the_interface_defaults_leave_room_to_think():

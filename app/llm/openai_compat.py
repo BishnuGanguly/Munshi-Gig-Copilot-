@@ -1,8 +1,7 @@
 """Any provider that speaks the OpenAI-style Chat Completions protocol.
 
-That is a long list - Sarvam, OpenAI, Groq, OpenRouter, Together, Ollama, vLLM, LM Studio - so one adapter
-with a base URL, an auth style and a model covers them all. Only the first of those has been checked against
-its docs (and only through search snippets); the rest rely on the protocol being standard.
+Sarvam speaks it, and so do many others (OpenAI, Groq, Ollama, vLLM ...), so one adapter with a base URL, an
+auth style and a model covers them. Only Sarvam is the planned target.
 
 Wire shape handled here:
   request   {"model", "messages": [system, user], "max_tokens", "tools": [{"type":"function","function":{...}}],

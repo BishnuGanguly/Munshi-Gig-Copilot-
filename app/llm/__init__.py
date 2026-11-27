@@ -1,20 +1,19 @@
 """Model providers, chosen by configuration.
 
-    BRAIN=sarvam                 one provider
-    BRAIN=sarvam,anthropic       a chain: the second answers only when the first is down
-    BRAIN=none                   off (the assistant says it did not understand)
+    BRAIN=sarvam                 Sarvam (the default plan)
+    BRAIN=none                   off: the assistant says the model key is not set
 
-Names: anthropic | sarvam | openai | groq | openrouter | ollama | openai_compat (anything else that speaks
-the OpenAI-style protocol - set BRAIN_BASE_URL, BRAIN_API_KEY_ENV, BRAIN_AUTH and BRAIN_MODEL_OPENAI_COMPAT).
+Two names: `sarvam`, and `openai_compat` for anything else that speaks the OpenAI-style Chat Completions
+protocol (set BRAIN_BASE_URL, BRAIN_API_KEY_ENV, BRAIN_AUTH and BRAIN_MODEL_OPENAI_COMPAT). A comma-separated
+list is a chain: the next provider answers only when the one before it is down.
 
-Per provider you can override: BRAIN_MODEL_<NAME> and BRAIN_BASE_URL_<NAME>. `BRAIN_MODEL` is shorthand for the
-FIRST provider's model. Adding a provider that speaks the OpenAI protocol is one entry in PRESETS; a provider
-with its own protocol is one new class implementing app/llm/base.py.
+Per provider you can override: BRAIN_MODEL_<NAME>, BRAIN_BASE_URL_<NAME> and BRAIN_REASONING_<NAME>.
+`BRAIN_MODEL` is shorthand for the FIRST provider's model. A provider with its own protocol would be one new
+class implementing app/llm/base.py.
 """
 import os
 from dataclasses import dataclass
 
-from .anthropic_provider import AnthropicProvider, DEFAULT_MODEL as ANTHROPIC_MODEL
 from .base import LlmProvider, ToolCall
 from .chain import FallbackLlm
 from .openai_compat import OpenAICompatProvider
@@ -29,19 +28,15 @@ class Preset:
     reasoning: tuple = () # (("choose", "low"), ("complete", "off")): reasoning_effort per kind of call
 
 
-# From Sarvam's docs, as surfaced by search (not opened directly): POST /v1/chat/completions, the key in an
-# `api-subscription-key` header, `sarvam-105b` (sarvam-m is deprecated). The others use the standard protocol.
+# Confirmed live: POST /v1/chat/completions, the key in an `api-subscription-key` header, model `sarvam-105b`
+# (`sarvam-m` is deprecated).
 PRESETS: dict[str, Preset] = {
     # sarvam-105b reasons by default and its reasoning tokens count against max_tokens. Choosing an action gets
     # a little thinking; rewording a sentence gets none (null turns thinking off, per Sarvam's docs).
     "sarvam": Preset("https://api.sarvam.ai/v1", "SARVAM_API_KEY", "header:api-subscription-key", "sarvam-105b",
                      (("choose", "low"), ("complete", "off"))),
-    "openai": Preset("https://api.openai.com/v1", "OPENAI_API_KEY", "bearer", "gpt-4.1-mini"),
-    "groq": Preset("https://api.groq.com/openai/v1", "GROQ_API_KEY", "bearer", "llama-3.3-70b-versatile"),
-    "openrouter": Preset("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "bearer", "openai/gpt-4.1-mini"),
-    "ollama": Preset("http://localhost:11434/v1", "OLLAMA_API_KEY", "none", "llama3.1"),
 }
-KNOWN = sorted({"anthropic", "openai_compat", *PRESETS})
+KNOWN = sorted({"openai_compat", *PRESETS})
 
 
 def _model_for(name: str, default: str, primary: bool) -> str:
@@ -53,8 +48,6 @@ def _model_for(name: str, default: str, primary: bool) -> str:
 def build_provider(name: str, primary: bool = True) -> LlmProvider:
     """One provider by name. Cheap: nothing is contacted and no key is needed until it is used."""
     name = name.strip().lower()
-    if name == "anthropic":
-        return AnthropicProvider(model=_model_for(name, ANTHROPIC_MODEL, primary))
     if name == "openai_compat":
         base = os.getenv("BRAIN_BASE_URL")
         if not base:

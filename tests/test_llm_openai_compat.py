@@ -1,4 +1,4 @@
-"""The OpenAI-style adapter (Sarvam, OpenAI, Groq, OpenRouter, Ollama ...), against a mocked HTTP server."""
+"""The OpenAI-style adapter (Sarvam and any other OpenAI-style server), against a mocked HTTP server."""
 import json
 
 import httpx
