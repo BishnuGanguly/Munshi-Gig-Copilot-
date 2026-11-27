@@ -27,16 +27,6 @@ def ask_type(entries: list[dict]) -> str:
     return "Were these amounts income or expenses? Please tell me for each one."
 
 
-def apply_type(e: dict, etype: str) -> None:
-    e["type"] = etype
-    if etype == "income":
-        e["category"] = "incentive" if e.get("category") == "incentive" else "earnings"
-    elif etype == "saving":
-        e["category"] = "savings"
-    elif e.get("category") in (None, "earnings", "incentive", "savings"):
-        e["category"] = "other"
-
-
 def _complete(e: dict, today: date) -> dict:
     """Fill defaults so entries from any source (rules or a model) have the same shape."""
     e = dict(e)

@@ -6,9 +6,16 @@ A rider sends a voice note — *"aaj Swiggy se 1400 aaye aur petrol 250 ka dala"
 it back for confirmation, and answers questions about their own money. Riders never pick a language: it is
 detected per message and the reply comes back in the same one.
 
-**Status: backend only.** There is no app and no WhatsApp bot yet; the channel plugs in on top of
-`POST /process`. 441 tests pass. See [What is and isn't verified](#what-is-and-isnt-verified) before
-trusting any provider-facing part.
+**Status: a working prototype.** A backend plus a web page to talk to it, started with one Docker command.
+The WhatsApp channel comes later and plugs in on top of `POST /process`. 517 tests pass. See
+[What is and isn't verified](#what-is-and-isnt-verified) before trusting any provider-facing part.
+
+```bash
+docker compose up --build        # then open http://localhost:3000
+```
+
+No keys and no `.env` are needed to start: the page opens and says which keys are not set. See
+[Running it](#running-it).
 
 ## The pipeline
 
@@ -38,18 +45,32 @@ Three things stay in code on purpose:
 - **Every number the rider is told.** Figures come from SQL in `tools.py`. The model only *rewords* our
   sentence, and a guard rejects the rewording if it contains a number we did not state.
 
-## Quick start
+## Running it
+
+**With Docker (one command).** Builds a Python 3.11 image with ffmpeg and the locked dependencies, and serves
+the app on port 3000:
 
 ```bash
-uv sync                      # creates .venv and installs everything, including a bundled ffmpeg
-cp .env.example .env         # copy on Windows; then edit it
-uv run pytest -q             # 441 passed
-uv run python scripts/chat_cli.py --fresh
+docker compose up --build
 ```
 
-Speech and voice default to **mocks**, so the project installs and its tests run with no API keys and at
-no cost. The model is not mocked, it is simply **off** (`BRAIN=none`), so a fresh checkout understands
-nothing and says so. For a working assistant set, in `.env`:
+Open **http://localhost:3000**. The page has a record button, a text box and an upload control; replies
+appear as text, and as a voice note when you spoke. A banner at the top says which services have no key.
+
+**Without Docker.** Python 3.11 or later and [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync                                          # creates .venv; ffmpeg comes bundled
+uv run uvicorn app.main:app --port 3000          # then open http://localhost:3000
+uv run pytest -q                                 # 517 passed
+```
+
+**What works with no keys.** Everything starts and the page works. Speech and voice fall back to **mocks**
+(the speech mock always hears one fixed sentence; the voice mock is a beep), and the banner says so. The
+model is not mocked, it is **off** (`BRAIN=none`), so a typed or spoken message gets the reply "The language
+model key is not set". Yes and no still work, because they never reach the model.
+
+**With keys.** Copy `.env.example` to `.env` (Docker Compose reads it automatically) and set:
 
 ```
 BRAIN=sarvam,anthropic       # Sarvam first; Claude only if Sarvam is down (see "Model providers")
@@ -60,6 +81,9 @@ SARVAM_API_KEY=...           # one key serves speech, voice and the model
 
 Then run `uv run python scripts/check_llm.py` once. Nothing here has been tried against a live provider, and
 that script says which assumption is wrong.
+
+**Keep keys out of the repository.** `.env` is ignored by git and by the Docker build, so a key never ends up
+in the image or in a commit. For a public demo, set keys as secrets on the host, never in code or the page.
 
 A conversation. The rider's side is Hinglish, which is the model's job; the replies below are the real
 output of `app/core/actions.py`, and in practice each one is then reworded into the rider's own language:
@@ -91,7 +115,7 @@ in SQL or Python (`app/core/tools.py`), never produced by a model.
 | | |
 |---|---|
 | **Log** | Income, expenses and savings; several per message; "yesterday"; bonuses as `incentive`. |
-| **Never guesses** | If income versus expense is unclear it asks ("Was ₹500 income or an expense?"). Amounts outside ₹1–₹50,000 are refused. |
+| **Never guesses** | If income versus expense is unclear it asks ("Was ₹500 income or an expense?"), and a bare "haan" does not skip the question. Amounts outside ₹1–₹50,000 are refused. |
 | **Correct** | "it was 300 not 250", "should be 300", "actually it was diesel" — the last saved entry, confirmed first. A correction to an entry still awaiting confirmation replaces it. |
 | **Delete** | "delete last entry", "undo" — confirmed first. |
 | **Ask** | Earnings, spending (by category), profit, best platform, savings, summary — for today, yesterday, this/last week, this/last month, or overall. |
@@ -212,9 +236,27 @@ Before the model sees a message (`app/text/`):
 `1,400` and `1400` count as the same figure in both number guards, so Indian digit grouping never makes a
 correct reply look invented.
 
-## HTTP API
+## The web page and HTTP API
 
-Start it with `uv run uvicorn app.main:app --reload`.
+### `GET /` — the app
+
+One self-contained page (`app/web/index.html`): no CDN, no build step, so it works offline as shipped.
+
+- **Record** a voice note (up to 60 seconds; the browser records `webm`/`ogg`/`m4a`, all accepted), **type**,
+  or **upload** an audio file.
+- Replies show the rider's-language text, our English sentence beneath it when they differ, the proposed
+  entries with their status, and the voice note.
+- **Haan / Nahi** buttons appear when an entry waits for confirmation; **Income / Expense** when the type is
+  unknown.
+- The key banner reads `/status`. Rider text is only ever set as text, never parsed as HTML.
+- Each browser is one rider; **New rider** starts afresh.
+
+Recording needs `localhost` or HTTPS (a browser rule); elsewhere, use upload. Safari may not play OGG/Opus
+voice replies, and the page says so when it can't.
+
+### `GET /status`
+
+Which services are configured, for the banner. Booleans, provider names and a message only — **never a key**.
 
 ### `POST /process`
 
@@ -222,9 +264,9 @@ Multipart form. `user_id` is required, plus either `audio` (a file) or `text`.
 `voice` is `auto` (the default: a voice note gets a voice reply), `always`, or `never`.
 
 ```bash
-curl -F user_id=u1 -F text="Swiggy se 1400 aaye" localhost:8000/process
-curl -F user_id=u1 -F audio=@note.ogg localhost:8000/process
-curl -F user_id=u1 -F text="hello" -F voice=always localhost:8000/process
+curl -F user_id=u1 -F text="Swiggy se 1400 aaye" localhost:3000/process
+curl -F user_id=u1 -F audio=@note.ogg localhost:3000/process
+curl -F user_id=u1 -F text="hello" -F voice=always localhost:3000/process
 ```
 
 Response fields:
@@ -243,14 +285,16 @@ Response fields:
 `ProcessResult.reply_audio` holds the raw voice-note bytes for the coming WhatsApp step.
 
 Errors: `400` for unusable audio or input (empty, silent, too long, unclear); `502` when a speech service
-is unavailable. A model that is off or failing is **not** an error — the reply says it did not understand
-and `warnings` explains why.
+is unavailable. A model that is off or failing is **not** an error: with no key the reply says the key is not
+set, a failing model says it did not understand, and `warnings` explains which.
 
 ### `POST /speak`
 
 `text` + `language` → an OGG/Opus voice note. For trying out voices.
 
 ### `GET /health`
+
+Also the Docker health check. `GET /docs` is the generated API reference.
 
 ## Command-line tools
 
@@ -260,10 +304,37 @@ uv run python scripts/process_cli.py note1.ogg      # one message through the pi
 uv run python scripts/check_llm.py                  # smoke-test each model provider in BRAIN, live
 uv run python scripts/transcribe_cli.py note1.ogg   # audio → transcript, language, confidence
 uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN
+uv run python scripts/evaluate.py                   # score the pipeline on 51 labelled transcripts
 ```
 
 `chat_cli.py` is multi-turn, so confirmations work; a path to an audio file sends it as a voice note.
 `speak_cli.py` writes `reply.ogg` and a `reply.wav` that plays in any Windows player.
+
+## Evaluation
+
+`scripts/evaluate.py` runs the whole pipeline on **51 labelled transcripts** (`tests/eval/cases.json`) in Hindi,
+Hinglish, English and Tamil, 38 clean and 13 noisy (misspelt platforms, filler words, dropped verbs,
+colloquial speech), and scores each against the entries a correct system would propose before the rider
+confirms.
+
+It reports **amount, type, category and platform** accuracy per expected entry, **completeness** and
+**intent** per case, split by language, clean versus noisy, and speech-to-text provider, with each stage's
+latency. Every failure is printed with its likely cause; for example, an amount that never reached the model
+is told apart from one the model got wrong. It exits non-zero below the target, **95% amount accuracy on
+clean input**. `--audio <folder>` uses recorded clips named `<case-id>.ogg` where they exist, so the score
+also covers speech-to-text.
+
+**Results: none yet.** It needs a live model. `--oracle` swaps in a stand-in that answers from the labels: it
+scores 100%, which proves the scorer works and says nothing about any model. Tests also check that every
+labelled amount survives text preparation, and that the scorer catches a model that swaps income and expense.
+
+Known weaknesses the set records:
+
+- **English number words** ("fifteen hundred") are not converted to digits, so such an amount cannot reach
+  the model and the number guard refuses it. One case (`en-13`) is marked as this known gap and reported
+  separately, not counted toward the target.
+- The **Tamil** cases were written without a native speaker and need review.
+- These are **transcripts**, not recordings. Real voice notes from riders on the road are still needed.
 
 ## Data
 
@@ -284,6 +355,8 @@ conversation context.
 ## Configuration
 
 All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing costs anything until changed.
+`docker-compose.yml` passes the main variables through with safe defaults; add any other variable to its
+`environment:` list to use it in Docker.
 
 | Group | Keys |
 |---|---|
@@ -294,17 +367,30 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 | **App** | `DB_PATH`, `LOG_LEVEL` |
 
 ffmpeg ships with the install (`imageio-ffmpeg`), so no system install is needed; `FFMPEG_BIN` overrides it.
-Optional extras: `uv sync --extra llm` (the Claude SDK, only needed for `anthropic`) and `uv sync --extra whisper` (offline speech-to-text).
+The Docker image uses Debian's ffmpeg instead, so it also runs on arm64 (Apple Silicon).
+Optional extras: `uv sync --extra llm` (the Claude SDK, only needed for `anthropic`; included in the Docker
+image) and `uv sync --extra whisper` (offline speech-to-text). Dependencies are declared in `pyproject.toml`
+and locked in `uv.lock`.
 
 ## What is and isn't verified
 
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 441 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
-action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, and
-the model-facing code against fake clients — including output that invents numbers or tries to act for
-another rider.
+**Covered by the 517 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, the
+model-facing code against fake clients (including output that invents numbers or tries to act for another
+rider), the evaluation scorer, the web page and status endpoint (including that no key ever appears in
+`/status`), and the Docker files' ports and defaults. The suite passes on Python 3.11 and 3.13.
+
+**The app, in a real browser:** Chromium, with a fake microphone, at 320 to 1280 pixels wide. Typing,
+recording a voice note, the transcript, the voice reply and the key banner all work, with no horizontal
+scroll on a phone and no console errors. The Docker image's steps were replayed outside Docker, with the same
+files, the same locked install on Python 3.11 and the same environment and no `.env`; that started and
+served every page.
+
+**Not verified:** the Docker image itself has not been built (no Docker daemon was available), and nothing
+below has ever had a live call.
 
 **Not verified — no live call has ever been made:**
 
@@ -315,7 +401,7 @@ another rider.
   reported inconsistently (₹10/₹25 or ₹15/₹60 per million tokens) and `parallel_tool_calls: false` is
   reported as *not* enforced on `sarvam-105b`. **Run `scripts/check_llm.py` first.**
 - **How well any model reads Hinglish and picks among seven tools.** The adapters are tested; the models are
-  not. That needs the evaluation set below.
+  not. `scripts/evaluate.py` is built for exactly this and has never been run against a model.
 - **Sarvam text-to-speech.** Whether the language field is `target_language_code` or `language_code` is
   unconfirmed, so the code retries with the other name; speaker names for a newer Bulbul than v2 are
   unchecked; and nobody has heard how it reads `₹1,400` aloud.
@@ -327,9 +413,10 @@ another rider.
 - **The WhatsApp bot.** No webhook; nothing is connected to WhatsApp.
 - **An end-of-day summary**, and the scheduler it needs.
 - **Spoken-friendly amounts** — the voice reads `₹1,400` rather than words.
-- **A real evaluation set** of 50+ rider recordings scored end to end. This is the most important gap:
-  the current tests prove the code matches our own assumptions, not that it works for riders.
-- Savings goals, reminders, hours tracking (the bot says so when asked), the web dashboard, Postgres.
+- **Real results.** The evaluation harness and 51 labelled transcripts exist; real rider recordings and a
+  live-model run do not. This is the most important gap: the tests prove the code matches our own
+  assumptions, not that it works for riders.
+- Savings goals, reminders, hours tracking (the bot says so when asked), a reporting dashboard, Postgres.
 
 ## Layout
 
@@ -340,7 +427,10 @@ app/
   pipeline.py          stage-by-stage orchestration, per-stage latency logs
   errors.py            AudioError, UnclearAudioError, ServiceUnavailableError
                        (+ Stt/TtsUnavailableError subclasses)
-  api/routes.py        /process, /speak, /health
+  api/routes.py        /, /status, /process, /speak, /health
+  web/index.html       the app's page: record, type or upload; read and hear the reply
+  status.py            what is configured, for the key banner (never a secret)
+  evaluation.py        scores the pipeline against labelled transcripts
   audio/               ffmpeg clean-up, validation, voice-note encoding
   stt/                 interface + sarvam, whisper_local, mock
   llm/                 the provider interface; anthropic, openai_compat (+ presets), fallback chain
@@ -355,8 +445,10 @@ app/
     db.py              schema + versioned migrations
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
-scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm
-tests/                 441 tests; tests/data/sentences.json holds the 75 sample sentences
+scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm, evaluate
+tests/                 517 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
+Dockerfile             Python 3.11 + ffmpeg + locked dependencies; serves port 3000 as a non-root user
+docker-compose.yml     one command to start it; every variable has a default, no .env needed
 ```
 
 ## History
@@ -365,4 +457,6 @@ Built in order: a FastAPI scaffold with mocks; audio input and speech-to-text; a
 rule-based English core; voice replies; the action registry, migrations and the daily target; an LLM
 understanding layer beside the rules; then — once measurement showed the rules could not answer questions
 in regional languages at all — the translation chain and the regexes were deleted and the model took over
-understanding. `git log` has the detail.
+understanding; the model was then put behind a provider interface (Sarvam, Claude, any OpenAI-style
+provider, with failover); finally an evaluation harness, the web page and the Docker setup. `git log` has the
+detail.

@@ -42,6 +42,8 @@ def describe_tx(tx: dict, today: date) -> str:
 
 HELP = ("I can log your earnings and expenses. Say for example: Got 1400 from Swiggy, spent 250 on petrol. "
         "You can also ask: How much did I earn this week?")
+MODEL_KEY_NOT_SET = ("The language model key is not set, so I cannot understand messages yet. "
+                     "Yes and no still work.")
 NOT_UNDERSTOOD = ("Sorry, I could not understand. Try: Got 1400 from Swiggy, or spent 250 on petrol, "
                   "or ask: How much did I earn this week?")
 NOTHING_PENDING = "There is nothing waiting for confirmation."

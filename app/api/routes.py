@@ -1,12 +1,29 @@
+from pathlib import Path
+
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import HTMLResponse
 
 from app import pipeline
+from app.status import status as service_status
 from app.audio import to_voice_note
 from app.tts import get_tts
 from app.tts.service import TTS_LANGUAGES
 from app.errors import ServiceUnavailableError
 
 router = APIRouter()
+INDEX_HTML = (Path(__file__).resolve().parent.parent / "web" / "index.html").read_text(encoding="utf-8")
+
+
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> HTMLResponse:
+    """The app's main screen: talk or type to Munshi, read and hear the reply."""
+    return HTMLResponse(INDEX_HTML)
+
+
+@router.get("/status")
+def status() -> dict:
+    """Which services are configured, for the key banner. Never contains a secret."""
+    return service_status()
 
 
 @router.get("/health")

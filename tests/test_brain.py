@@ -270,3 +270,58 @@ def test_cancel_my_last_entry_is_a_delete_request_not_a_refusal(chat):
     r2, api = router_for([("delete_entry", {})])
     out = chat("cancel my last entry", understander=r2)
     assert len(api.chooses) == 1 and "Delete the last entry" in out.outcome.reply
+
+
+# ---------------------------------------------------------------- regression: "yes" while the type is still unknown
+def test_yes_while_awaiting_the_type_asks_again_instead_of_crashing(chat):
+    """Regression. When the rules were deleted, nothing stopped a bare "haan" from committing an entry whose
+    type was still unknown, and the database rejected it (NOT NULL on transactions.type): a 500 in a demo."""
+    r, api = router_for([("log_entries", {"entries": [{"amount": 500}]})])
+    assert chat("500", understander=r).outcome.reply == "Was ₹500 income or an expense?"
+    n = len(api.chooses)
+    out = chat("haan", understander=r)
+    assert out.outcome.reply == "Was ₹500 income or an expense?" and out.outcome.intent == "clarify"
+    assert len(api.chooses) == n                                     # answered locally
+    assert saved(chat) == [] and tools.get_pending(chat.conn, "u", NOW)["awaiting"] == "type"
+
+
+def test_the_type_answer_then_goes_to_the_model_which_completes_the_entry(chat):
+    r1, _ = router_for([("log_entries", {"entries": [{"amount": 500}]})])
+    chat("500", understander=r1)
+    r2, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 500, "category": "fuel"}]})])
+    assert "Please confirm: expense ₹500 on fuel" in chat("petrol tha", understander=r2).outcome.reply
+    chat("haan")
+    assert saved(chat)[0]["type"] == "expense"
+
+
+def test_only_the_waiting_entry_s_amount_counts_as_already_said(chat):
+    """The exemption is narrow: an amount from the entry still waiting is grounded; any other number the
+    rider did not say is still refused."""
+    r1, _ = router_for([("log_entries", {"entries": [{"amount": 500}]})])
+    chat("500", understander=r1)
+    r2, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 900, "category": "fuel"}]})])
+    out = chat("petrol tha", understander=r2)
+    assert "₹900" not in out.outcome.reply and saved(chat) == []
+
+
+def test_the_model_is_told_what_the_waiting_entry_contains(chat):
+    r1, _ = router_for([("log_entries", {"entries": [{"amount": 500, "platform": "Swiggy"}]})])
+    chat("500 swiggy", understander=r1)
+    r2, api = router_for([("help", {})])
+    chat("kharcha tha", understander=r2)
+    sent = api.chooses[0]["user"]
+    assert "waiting entry: 500 rupees" in sent and "platform Swiggy" in sent
+    assert "just asked whether that was income or an expense" in sent
+
+
+def test_with_no_model_the_reply_says_key_not_set_not_could_not_understand(chat):
+    """The organisers start the app without keys. 'I could not understand' reads as the product failing;
+    the honest reason is that no model key is set."""
+    out = chat("aaj swiggy se 1400 aaye", understander=None, renderer=None)
+    assert "key is not set" in out.outcome.reply and "could not understand" not in out.outcome.reply
+    assert out.outcome.intent == "unknown" and "understanding_unavailable" in out.warnings
+
+
+def test_with_a_model_that_fails_the_reply_is_still_could_not_understand(chat):
+    out = chat("kuch bhi", understander=Understander(REGISTRY, FakeProvider(turns=[[]])), renderer=None)
+    assert "could not understand" in out.outcome.reply and "key" not in out.outcome.reply

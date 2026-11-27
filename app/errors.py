@@ -17,9 +17,6 @@ class SttUnavailableError(ServiceUnavailableError):
     """Every configured speech-to-text provider failed (network, auth, quota)."""
 
 
-class TranslateUnavailableError(ServiceUnavailableError):
-    """Every configured translation provider failed (network, auth, quota)."""
-
 
 class TtsUnavailableError(ServiceUnavailableError):
     """Text-to-speech failed (network, auth, quota). Never blocks the text reply."""

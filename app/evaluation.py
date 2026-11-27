@@ -35,7 +35,6 @@ from app.llm.base import ToolCall
 from app.text import extract_numbers, normalize
 
 CASES_PATH = Path(__file__).resolve().parent.parent / "tests" / "eval" / "cases.json"
-METRICS = ("amount", "type", "category", "platform")
 AUDIO_EXTENSIONS = (".ogg", ".opus", ".wav", ".mp3", ".m4a")
 
 

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from app.llm import LlmProvider, get_provider
 from app.text import normalize, normalize_digits
 from . import db, replies, tools, validate
-from .actions import REGISTRY
+from .actions import REGISTRY, ask_type
 from .dates import now_ist
 from .registry import ActionError, Context, Outcome, Registry
 
@@ -139,6 +139,13 @@ def build_context(ctx: Context, pending: dict | None, turns: list[dict], target:
         lines.append(f"The rider's daily income target is {target:g} rupees.")
     if pending:
         lines.append(f"An action is already waiting for the rider's yes or no: {pending.get('action')}.")
+        for e in pending.get("entries", []):
+            kind = e.get("type") or "income or expense not yet known"
+            where = f", platform {e['platform']}" if e.get("platform") else ""
+            lines.append(f"  waiting entry: {e.get('amount'):g} rupees, {kind}, category {e.get('category')}{where}")
+        if pending.get("awaiting") == "type":
+            lines.append("The assistant has just asked whether that was income or an expense. If the rider answers, "
+                         "call log_entries again with the same amount and the type they gave.")
     for t in turns[-4:]:
         if t.get("normalized_text"):
             lines.append(f"Earlier - rider: {t['normalized_text']}")
@@ -164,7 +171,9 @@ class Understander:
             f"{context}\n\nThe rider says: {text}")
         return [(c.name, c.args) for c in calls[: self.max_actions]]
 
-    def understand(self, ctx: Context, text: str, context: str) -> Outcome | None:
+    def understand(self, ctx: Context, text: str, context: str, already_said: str = "") -> Outcome | None:
+        """`already_said` carries amounts the rider stated earlier and is still being asked about (an entry
+        waiting for confirmation). Those count as grounded; nothing else from earlier turns does."""
         """Execute the first usable action the model chose, or None if it gave us nothing we can trust."""
         try:
             calls = self._call(text, context)
@@ -175,7 +184,7 @@ class Understander:
             if not isinstance(args, dict):
                 log.warning("non-object arguments for %s", name)
                 continue
-            missing = ungrounded_numbers(args, text)
+            missing = ungrounded_numbers(args, f"{text} {already_said}".strip())
             if missing:
                 log.warning("dropped %s: numbers the rider did not say: %s", name, missing)
                 continue
@@ -270,7 +279,10 @@ def handle(conn, user_id: str, text: str, now=None, understander=None, renderer=
 
     # 1. Confirmations, answered locally: no model call, no way to get it wrong.
     if pending:
-        if validate.is_yes(normalized):
+        if validate.is_yes(normalized) and pending.get("awaiting") == "type":
+            # "haan" does not answer "income or an expense?". Ask again; never store an entry without a type.
+            outcome = Outcome(ask_type(pending["entries"]), intent="clarify")
+        elif validate.is_yes(normalized):
             outcome = REGISTRY.commit(ctx, pending)
         elif validate.is_no(normalized):
             tools.clear_pending(conn, user_id)
@@ -284,10 +296,14 @@ def handle(conn, user_id: str, text: str, now=None, understander=None, renderer=
         if understander is not None:
             context = build_context(ctx, pending, db.recent_turns(conn, user_id),
                                     tools.get_target(conn, user_id, ctx.today))
-            outcome = understander.understand(ctx, normalized, context)
+            already_said = " ".join(f"{e.get('amount'):g}" for e in (pending or {}).get("entries", [])
+                                    if isinstance(e.get("amount"), (int, float)))
+            outcome = understander.understand(ctx, normalized, context, already_said)
         if outcome is None:
-            outcome = Outcome(replies.NOT_UNDERSTOOD, intent="unknown",
-                              warnings=[] if understander is not None else ["understanding_unavailable"])
+            if understander is None:   # no model configured: say so plainly rather than "I did not understand"
+                outcome = Outcome(replies.MODEL_KEY_NOT_SET, intent="unknown", warnings=["understanding_unavailable"])
+            else:
+                outcome = Outcome(replies.NOT_UNDERSTOOD, intent="unknown")
 
     # 3. The reply: our English sentence, reworded into the rider's language. Figures come from step 2.
     reply_user, language = outcome.reply, DEFAULT_LANGUAGE
