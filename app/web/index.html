@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Munshi — talk to your hisaab</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #6b6860; --line: #e3e0d8;
+    --brand: #0f766e; --brand-ink: #ffffff; --rider: #e7f3f1; --warn-bg: #fff4dc; --warn-ink: #7a4b00;
+    --ok-bg: #e5f4ea; --ok-ink: #1f6b3a; --err-bg: #fde8e8; --err-ink: #8a1c1c; --chip: #f0eee8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151513; --panel: #1f1e1b; --ink: #ecebe6; --muted: #a29f95; --line: #34322d;
+      --brand: #2dd4bf; --brand-ink: #062b27; --rider: #173431; --warn-bg: #3a2e12; --warn-ink: #f3cf7d;
+      --ok-bg: #16301f; --ok-ink: #8fd6a6; --err-bg: #3b1818; --err-ink: #f2a6a6; --chip: #2a2925;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 16px; min-height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 { font-size: 1.35rem; margin: 0; }
+  .tag { color: var(--muted); font-size: .9rem; margin: 2px 0 0; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); padding: 8px 12px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+  #status { margin: 14px 0 6px; display: grid; gap: 6px; }
+  .note { border-radius: 10px; padding: 8px 12px; font-size: .9rem; }
+  .note.warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .note.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  #log { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
+  .empty { color: var(--muted); text-align: center; margin: 32px 8px; }
+  .empty b { color: var(--ink); }
+  .msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line);
+         overflow-wrap: anywhere; }
+  .msg.rider { align-self: flex-end; background: var(--rider); border-color: transparent; }
+  .msg.err { background: var(--err-bg); color: var(--err-ink); border-color: transparent; }
+  .who { font-size: .75rem; color: var(--muted); margin-bottom: 2px; }
+  .english { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: .85rem; }
+  .chip b { font-weight: 600; }
+  .quick { display: flex; gap: 8px; margin-top: 8px; }
+  audio { width: 100%; margin-top: 8px; }
+  details { margin-top: 6px; font-size: .8rem; color: var(--muted); }
+  /* minmax(0,1fr): a grid column otherwise refuses to shrink below its widest child (the upload row) */
+  form { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 4px; display: grid;
+         grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  #text { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+          background: var(--panel); color: var(--ink); }
+  #mic { min-width: 104px; }
+  #mic.rec { background: var(--err-ink); color: #fff; border-color: transparent; }
+  .small { font-size: .85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .small label { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
+  input[type=file] { max-width: 100%; min-width: 0; }
+  select, input[type=file] { font: inherit; font-size: .85rem; color: var(--ink); }
+  select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; padding: 8px 0 0; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Munshi</h1>
+      <p class="tag">Voice bookkeeping for delivery and ride-hailing riders. Speak or type in any Indian language.</p>
+    </div>
+    <button id="reset" type="button" title="Start again as a new rider">New rider</button>
+  </header>
+
+  <div id="status" aria-live="polite"></div>
+
+  <main id="log" aria-live="polite">
+    <div class="empty" id="empty">
+      Try saying or typing <b>“aaj Swiggy se 1400 aaye aur petrol 250 ka dala”</b>,
+      then answer <b>haan</b>.<br>Ask <b>“is hafte kitna kamaya?”</b> or <b>“sabse achha platform kaunsa hai?”</b>
+    </div>
+  </main>
+
+  <form id="composer" autocomplete="off">
+    <div class="row">
+      <button id="mic" type="button" title="Record a voice note (up to 60 seconds)">● Record</button>
+      <input id="text" name="text" placeholder="Type a message…" aria-label="Message">
+      <button class="primary" type="submit">Send</button>
+    </div>
+    <div class="small">
+      <label>Or upload a voice note <input id="file" type="file" accept="audio/*"></label>
+      <label>Voice reply
+        <select id="voice"><option value="auto">for voice notes</option><option value="always">always</option>
+          <option value="never">never</option></select></label>
+    </div>
+  </form>
+  <footer>Every amount is read back and saved only after you say yes. API: <a href="/docs">/docs</a></footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const log = $("#log"), text = $("#text"), mic = $("#mic"), file = $("#file"), voice = $("#voice");
+  const CONFIRM = /Is that correct\?|Say yes to confirm/;
+  const TYPE_Q = /income or an expense\?|income or expenses\?/;
+
+  // ------------------------------------------------------------------ rider identity (per browser)
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: keep it in memory */ } },
+  };
+  const newId = () => "web-" + Math.random().toString(36).slice(2, 10);
+  let userId = store.get("munshi-user") || newId();
+  store.set("munshi-user", userId);
+  $("#reset").onclick = () => {
+    userId = newId(); store.set("munshi-user", userId);
+    log.replaceChildren($("#empty") || document.createElement("div"));
+  };
+
+  // ------------------------------------------------------------------ the key banner
+  fetch("/status").then((r) => r.json()).then((s) => {
+    const box = $("#status"), parts = [s.model, s.speech_to_text, s.voice];
+    const missing = parts.filter((p) => !p.ready);
+    for (const p of missing) box.append(el("div", "note warn", p.message));
+    if (!missing.length) box.append(el("div", "note ok", "All services connected."));
+  }).catch(() => $("#status").append(el("div", "note warn", "Could not read the service status.")));
+
+  // ------------------------------------------------------------------ helpers (textContent only: rider text is never parsed as HTML)
+  function el(tag, cls, txt) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt !== undefined) n.textContent = txt;
+    return n;
+  }
+  const rupees = (n) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  const STATUS = { pending_confirmation: "waiting for yes", needs_type: "income or expense?", saved: "saved" };
+
+  function bubble(cls, who) {
+    $("#empty")?.remove();
+    const b = el("div", "msg " + cls);
+    b.append(el("div", "who", who));
+    log.append(b);
+    b.scrollIntoView({ behavior: "smooth", block: "end" });
+    return b;
+  }
+
+  function showReply(r, riderBubble) {
+    if (riderBubble && r.transcript) riderBubble.lastChild.textContent = r.transcript;
+    const b = bubble("", "Munshi");
+    b.append(el("div", "", r.reply_user_language || r.reply_english));
+    if (r.reply_english && r.reply_english !== r.reply_user_language) b.append(el("div", "english", r.reply_english));
+    if (r.entries && r.entries.length) {
+      const chips = el("div", "chips");
+      for (const e of r.entries) {
+        const c = el("span", "chip");
+        c.append(el("b", "", rupees(e.amount)));
+        const what = [e.type || "type unknown", e.platform || (e.category !== "other" ? e.category : "")]
+          .filter(Boolean).join(" · ");
+        c.append(document.createTextNode(" " + what + (STATUS[e.status] ? " — " + STATUS[e.status] : "")));
+        chips.append(c);
+      }
+      b.append(chips);
+    }
+    const english = r.reply_english || "";
+    if (CONFIRM.test(english)) b.append(quick([["Haan / Yes", "haan"], ["Nahi / No", "nahi"]]));
+    else if (TYPE_Q.test(english)) b.append(quick([["Income", "income tha"], ["Expense", "kharcha tha"]]));
+    if (r.reply_audio_base64) {
+      const a = el("audio");
+      a.controls = true;
+      a.src = "data:audio/ogg;base64," + r.reply_audio_base64;
+      a.onerror = () => a.replaceWith(el("div", "english", "This browser cannot play the voice reply (OGG/Opus)."));
+      b.append(a);
+      a.play().catch(() => {});
+    }
+    if (r.warnings && r.warnings.length) {
+      const d = el("details");
+      d.append(el("summary", "", "details"));
+      d.append(el("div", "", r.warnings.join(" · ")));
+      b.append(d);
+    }
+    b.scrollIntoView({ behavior: "smooth", block: "end" });
+  }
+
+  function quick(options) {
+    const row = el("div", "quick");
+    for (const [label, say] of options) {
+      const btn = el("button", "", label);
+      btn.type = "button";
+      btn.onclick = () => { row.querySelectorAll("button").forEach((x) => (x.disabled = true)); sendText(say); };
+      row.append(btn);
+    }
+    return row;
+  }
+
+  // ------------------------------------------------------------------ talking to the backend
+  async function post(form, riderBubble) {
+    form.append("user_id", userId);
+    form.append("voice", voice.value);
+    const wait = bubble("", "Munshi");
+    wait.append(el("div", "english", "…"));
+    try {
+      const res = await fetch("/process", { method: "POST", body: form });
+      const body = await res.json().catch(() => ({}));
+      wait.remove();
+      if (!res.ok) {
+        const b = bubble("err", "Munshi");
+        b.append(el("div", "", typeof body.detail === "string" ? body.detail : "Something went wrong (" + res.status + ")."));
+        return;
+      }
+      showReply(body, riderBubble);
+    } catch (e) {
+      wait.remove();
+      bubble("err", "Munshi").append(el("div", "", "Could not reach the server."));
+    }
+  }
+
+  function sendText(t) {
+    t = (t || "").trim();
+    if (!t) return;
+    bubble("rider", "You").append(el("div", "", t));
+    const f = new FormData();
+    f.append("text", t);
+    post(f);
+  }
+
+  function sendAudio(blob, name) {
+    const rb = bubble("rider", "You");
+    rb.append(el("div", "", "🎤 voice note…"));
+    const f = new FormData();
+    f.append("audio", blob, name);
+    post(f, rb);
+  }
+
+  $("#composer").onsubmit = (ev) => { ev.preventDefault(); sendText(text.value); text.value = ""; text.focus(); };
+  file.onchange = () => { if (file.files[0]) sendAudio(file.files[0], file.files[0].name); file.value = ""; };
+
+  // ------------------------------------------------------------------ recording
+  let rec = null, chunks = [], timer = null;
+  const canRecord = window.isSecureContext && navigator.mediaDevices && window.MediaRecorder;
+  if (!canRecord) {
+    mic.disabled = true;
+    mic.title = "Recording needs https or localhost and a browser with MediaRecorder. Upload a voice note instead.";
+  }
+  const pickType = () => ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
+    .find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+
+  mic.onclick = async () => {
+    if (rec && rec.state === "recording") { rec.stop(); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { bubble("err", "Munshi").append(el("div", "", "Microphone permission was refused.")); return; }
+    const type = pickType();
+    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    chunks = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
+      clearInterval(timer);
+      stream.getTracks().forEach((t) => t.stop());
+      mic.classList.remove("rec");
+      mic.textContent = "● Record";
+      const mime = rec.mimeType || type || "audio/webm";
+      const ext = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
+      if (chunks.length) sendAudio(new Blob(chunks, { type: mime }), "voice." + ext);
+    };
+    rec.start();
+    mic.classList.add("rec");
+    let s = 0;
+    mic.textContent = "■ Stop 0s";
+    timer = setInterval(() => {
+      s += 1;
+      mic.textContent = "■ Stop " + s + "s";
+      if (s >= 59) rec.stop();               // the backend refuses notes over 60 seconds
+    }, 1000);
+  };
+})();
+</script>
+</body>
+</html>

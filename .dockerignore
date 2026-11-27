@@ -1,0 +1,15 @@
+# Never ship secrets or local state into the image.
+.env
+.env.*
+!.env.example
+.git
+.venv
+data
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.ogg
+*.opus
+*.wav
+*.m4a
+*.mp3

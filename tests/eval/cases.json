@@ -1,0 +1,885 @@
+{
+ "note": "Transcripts, not audio: the text a speech-to-text engine would hand over. 'noisy' mimics its errors (misspelt platforms, filler words, dropped verbs, colloquial speech). `expect` is what a correct system produces BEFORE the rider confirms. Query cases carry `args` only so the oracle can replay them. The Tamil cases were written without a native speaker and need review. A case with `known_gap` is a weakness we have not fixed: it is reported, not counted toward the target.",
+ "cases": [
+  {
+   "id": "en-01",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Got 1400 from Swiggy today",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-02",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Spent 250 on petrol",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-03",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Got 1400 from Swiggy and spent 250 on petrol",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-04",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Zomato paid me 850 yesterday",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 850,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-05",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Bike service cost 1200 rupees",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 1200,
+      "category": "repair",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-06",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Mobile recharge of 299",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 299,
+      "category": "recharge",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-07",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Paid a 500 rupee challan",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 500,
+      "category": "penalty",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-08",
+   "lang": "English",
+   "noise": "clean",
+   "text": "I saved 400 rupees today",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "saving",
+      "amount": 400,
+      "category": "savings",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-09",
+   "lang": "English",
+   "noise": "clean",
+   "text": "How much did I earn this week",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "earnings",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "en-10",
+   "lang": "English",
+   "noise": "clean",
+   "text": "Which platform is best for me",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "best_platform",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "en-11",
+   "lang": "English",
+   "noise": "noisy",
+   "text": "um so i got uh 1400 from swigi and like 250 on petrol",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-12",
+   "lang": "English",
+   "noise": "noisy",
+   "text": "got 900 from zomaato yesterday",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 900,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "en-13",
+   "lang": "English",
+   "noise": "noisy",
+   "text": "got fifteen hundred from uber",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1500,
+      "category": "earnings",
+      "platform": "Uber"
+     }
+    ]
+   },
+   "known_gap": "English number words are not converted to digits, so the amount is not in the text the model reads and the number guard rightly refuses it"
+  },
+  {
+   "id": "hl-01",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "aaj swiggy se 1400 aaye",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-02",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "petrol 250 ka dala",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-03",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "zomato se dedh hazaar mile",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1500,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-04",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "kal rapido se saadhe teen sau kamaye",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 350,
+      "category": "earnings",
+      "platform": "Rapido"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-05",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "puncture ke dhai sau lage",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "repair",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-06",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "bike ki service mein barah sau kharcha hua",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 1200,
+      "category": "repair",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-07",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "recharge 299 ka karwaya",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 299,
+      "category": "recharge",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-08",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "challan ka paanch sau bhara",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 500,
+      "category": "penalty",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-09",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "uber se do hazaar paanch sau mile",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 2500,
+      "category": "earnings",
+      "platform": "Uber"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-10",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "is hafte kitna kamaya",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "earnings",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "hl-11",
+   "lang": "Hinglish",
+   "noise": "clean",
+   "text": "sabse achha platform kaun sa hai",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "best_platform",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "hl-12",
+   "lang": "Hinglish",
+   "noise": "noisy",
+   "text": "swigi se pachas rupaye aur zomaato se sau rupaye",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 50,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "income",
+      "amount": 100,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-13",
+   "lang": "Hinglish",
+   "noise": "noisy",
+   "text": "aaj uh swiggy se 1400 aaye aur petrol 250 dala",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hl-14",
+   "lang": "Hinglish",
+   "noise": "noisy",
+   "text": "500",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": null,
+      "amount": 500,
+      "category": "other",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-01",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "आज स्विगी से चौदह सौ रुपये आए",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-02",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "पेट्रोल में ढाई सौ रुपये लगे",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-03",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "ज़ोमैटो से आठ सौ पचास मिले",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 850,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-04",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "कल रैपिडो से डेढ़ हज़ार कमाए",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1500,
+      "category": "earnings",
+      "platform": "Rapido"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-05",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "गाड़ी की सर्विस में बारह सौ खर्च हुए",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 1200,
+      "category": "repair",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-06",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "मोबाइल रिचार्ज दो सौ निन्यानवे का करवाया",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 299,
+      "category": "recharge",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-07",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "ईएमआई पाँच हज़ार दो सौ की गई",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 5200,
+      "category": "emi",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-08",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "उबर से सत्रह सौ पचास रुपये मिले",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1750,
+      "category": "earnings",
+      "platform": "Uber"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-09",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "इस हफ़्ते कितना कमाया",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "earnings",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "hi-10",
+   "lang": "Hindi",
+   "noise": "clean",
+   "text": "सबसे अच्छा प्लेटफ़ॉर्म कौन सा है",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "best_platform",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "hi-11",
+   "lang": "Hindi",
+   "noise": "noisy",
+   "text": "आज स्विगी से 1400 आए और पेट्रोल 250",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-12",
+   "lang": "Hindi",
+   "noise": "noisy",
+   "text": "जोमाटो से सौ रुपये मिले",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 100,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-13",
+   "lang": "Hindi",
+   "noise": "noisy",
+   "text": "आज मैं दो सौ पचास रुपए का बचत किया।",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "saving",
+      "amount": 250,
+      "category": "savings",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hi-14",
+   "lang": "Hindi",
+   "noise": "noisy",
+   "text": "डीज़ल सवा दो सौ का डाला",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 225,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-01",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "இன்று ஸ்விக்கியில் 1400 ரூபாய் கிடைத்தது",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-02",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "பெட்ரோலுக்கு 250 ரூபாய் செலவு ஆனது",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-03",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "இந்த வாரம் எவ்வளவு சம்பாதித்தேன்",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "earnings",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "ta-04",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "சோமாட்டோவில் 800 ரூபாய் கிடைத்தது",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 800,
+      "category": "earnings",
+      "platform": "Zomato"
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-05",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "வண்டி சர்வீஸுக்கு 1200 ரூபாய் ஆனது",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 1200,
+      "category": "repair",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-06",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "எந்த ஆப் சிறந்தது",
+   "expect": {
+    "intent": "query",
+    "entries": [],
+    "args": {
+     "kind": "best_platform",
+     "period": "this_week"
+    }
+   }
+  },
+  {
+   "id": "ta-07",
+   "lang": "Tamil",
+   "noise": "clean",
+   "text": "ஊபரில் 1750 ரூபாய் கிடைத்தது",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1750,
+      "category": "earnings",
+      "platform": "Uber"
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-08",
+   "lang": "Tamil",
+   "noise": "noisy",
+   "text": "இன்னைக்கு ஸ்விக்கில 900 வந்துச்சு",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 900,
+      "category": "earnings",
+      "platform": "Swiggy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-09",
+   "lang": "Tamil",
+   "noise": "noisy",
+   "text": "பெட்ரோல் 300 போட்டேன்",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "expense",
+      "amount": 300,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "ta-10",
+   "lang": "Tamil",
+   "noise": "noisy",
+   "text": "ஸ்விக்கி 1400 பெட்ரோல் 250",
+   "expect": {
+    "intent": "log",
+    "entries": [
+     {
+      "type": "income",
+      "amount": 1400,
+      "category": "earnings",
+      "platform": "Swiggy"
+     },
+     {
+      "type": "expense",
+      "amount": 250,
+      "category": "fuel",
+      "platform": null
+     }
+    ]
+   }
+  }
+ ]
+}

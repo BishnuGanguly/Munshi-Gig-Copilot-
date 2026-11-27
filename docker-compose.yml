@@ -1,0 +1,27 @@
+# One command:  docker compose up --build      then open http://localhost:3000
+#
+# No .env file and no keys are needed to start. To use real services, create a .env next to this file
+# (copy .env.example). Docker Compose reads it automatically for the ${...} values below; if it is missing,
+# every value falls back to the default after ":-".
+services:
+  munshi:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      BRAIN: ${BRAIN:-none}
+      BRAIN_MODEL: ${BRAIN_MODEL:-}
+      BRAIN_MODEL_SARVAM: ${BRAIN_MODEL_SARVAM:-}
+      BRAIN_MODEL_ANTHROPIC: ${BRAIN_MODEL_ANTHROPIC:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      STT_PROVIDER: ${STT_PROVIDER:-mock}
+      TTS_PROVIDER: ${TTS_PROVIDER:-mock}
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DB_PATH: data/munshi.db
+    volumes:
+      - munshi-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  munshi-data:
