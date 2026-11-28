@@ -7,7 +7,7 @@ it back for confirmation, and answers questions about their own money. Riders ne
 detected per message and the reply comes back in the same one.
 
 **Status: a working prototype.** A backend plus a web page to talk to it, started with one Docker command.
-The WhatsApp channel comes later and plugs in on top of `POST /process`. 628 tests pass. See
+The WhatsApp channel comes later and plugs in on top of `POST /process`. 662 tests pass. See
 [What is and isn't verified](#what-is-and-isnt-verified) before trusting any provider-facing part.
 
 ```bash
@@ -62,7 +62,7 @@ appear as text, and as a voice note when you spoke. A banner at the top says whi
 ```bash
 uv sync                                          # creates .venv; ffmpeg comes bundled
 uv run uvicorn app.main:app --port 3000          # then open http://localhost:3000
-uv run pytest -q                                 # 628 passed
+uv run pytest -q                                 # 662 passed
 ```
 
 **What works with no keys.** Everything starts and the page works. Speech and voice fall back to **mocks**
@@ -119,7 +119,7 @@ in SQL or Python (`app/core/tools.py`), never produced by a model.
 | **Correct** | "it was 300 not 250", "should be 300", "actually it was diesel" — the last saved entry, confirmed first. Something new said before confirming is *added* to what is waiting; only a correction replaces it. |
 | **Delete** | "delete last entry", "undo" — confirmed first. |
 | **Ask** | Earnings (by platform or as incentives), spending (by category or platform), profit, best platform, savings — for today, yesterday, this/last week, this/last month, or overall. |
-| **An insight with every save** | After "haan", one line chosen by code. Once today has costs, saving income says what is left after them ("Today ₹1,650 in, ₹260 spent: ₹1,390 after costs"), because most riders take gross as net. Otherwise: target just reached (and the streak), how far above or short of the target, today against a usual working day (only when better — the day is not over), or an expense's share of the week's earnings. Otherwise the day's profit. |
+| **An insight with every save** | After "haan", code computes a sheet of facts (earnings after costs, the target, the streak, today against a usual day, the biggest cost's share of the week, the best platform) and the model chooses the one or two that matter and says them in the rider's language, in the same call that would otherwise only translate. Every number it says must be one of those facts, or a fixed sentence is used instead. That fixed sentence is chosen by code. Once today has costs, saving income says what is left after them ("Today ₹1,650 in, ₹260 spent: ₹1,390 after costs"), because most riders take gross as net. Otherwise: target just reached (and the streak), how far above or short of the target, today against a usual working day (only when better — the day is not over), or an expense's share of the week's earnings. Otherwise the day's profit. |
 | **Daily summary** | "aaj ka hisaab": income by platform, expenses by category, profit, the target, and today against the rider's recent daily average (working days only, once there are three). |
 | **Profit per platform** | Each app's income minus its own costs (penalties, commission); shared costs are shown separately, never split by guesswork. Over a week, also per working day, which is fairer than totals. |
 | **Daily target** | Per rider, confirmed before it changes, with history kept so a past day is judged by the target in force then. Progress after each save, plus a streak. |
@@ -375,7 +375,7 @@ and locked in `uv.lock`.
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 628 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+**Covered by the 662 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
 action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, the
 model-facing code against fake clients (including output that invents numbers or tries to act for another
 rider), the evaluation scorer, the web page and status endpoint (including that no key ever appears in
@@ -441,7 +441,7 @@ app/
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
 scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm, evaluate
-tests/                 628 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
+tests/                 662 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
 Dockerfile             Python 3.11 + ffmpeg + locked dependencies; serves port 3000 as a non-root user
 docker-compose.yml     one command to start it; every variable has a default, no .env needed
 ```

@@ -99,6 +99,9 @@ The container runs as a non-root user and has a healthcheck on `/health`
    share of the week's earnings. "Better than your usual day" needs income on three earlier days.
    Then log more income: because a cost exists today, the reply says what is left after costs
    ("asli kamai" in Hinglish).
+   With a model configured, the model picks which fact to say, so the wording varies; the fixed sentence
+   appears only without a model, or when the model's answer used a number that is not a computed fact (a
+   warning starting `insight_not_used` is then in the response and the log).
 5. A voice note is answered with a voice note; typed text is answered with text only.
 
 Rider identity on the page is a locally stored id. Different ids have separate books.
@@ -134,7 +137,7 @@ All run from the repository root with `uv run python scripts/<name>.py`.
 
 | Script | What it does |
 |---|---|
-| `check_llm.py` | Two real model calls per provider in `BRAIN`: picks the right action, and rewords a reply without changing a number. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
+| `check_llm.py` | Three real model calls per provider in `BRAIN`: picks the right action, rewords a reply without changing a number, and after a save chooses an insight from computed facts without inventing a number. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
 | `transcribe_cli.py note1.ogg` | Speech-to-text only; prints the transcript and language. |
 | `speak_cli.py "text" --lang hi-IN -o reply` | Text-to-speech; writes `reply.ogg` and `reply.wav`. |
 | `process_cli.py note1.ogg` or `process_cli.py "text"` | The whole pipeline once; prints the JSON. In-memory database. |
@@ -153,7 +156,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (628 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (662 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,

@@ -94,8 +94,10 @@ def _log_commit(ctx: Context, pending: dict) -> Outcome:
     before = tools.get_summary(ctx.conn, ctx.user_id, today, today)["income"]
     for e in pending["entries"]:
         tools.add_transaction(ctx.conn, ctx.user_id, e["type"], e["amount"], e["category"], e["platform"], e["date"])
+    # The fixed sentence is what the rider hears without a model, and whenever the model's choice is unusable.
     reply = "Saved. " + insights.after_save(ctx.conn, ctx.user_id, today, pending["entries"], before)
-    return Outcome(reply, [entry_out(e, "saved") for e in pending["entries"]], "confirm")
+    facts = insights.facts_after_save(ctx.conn, ctx.user_id, today, pending["entries"], before)
+    return Outcome(reply, [entry_out(e, "saved") for e in pending["entries"]], "confirm", facts=facts)
 
 
 # ------------------------------------------------------------------ correct_entry / delete_entry (the last SAVED entry)

@@ -199,9 +199,18 @@ def test_check_llm_passes_a_well_behaved_provider_and_fails_a_poor_one(monkeypat
 
     good = FakeProvider(turns=[[("log_entries", {"entries": [
         {"type": "income", "amount": 1400, "platform": "Swiggy"}, {"type": "expense", "amount": 250, "category": "fuel"}]})]],
-        text=json.dumps({"language": "hi-Latn", "reply": "Swiggy se ₹1,400 income, petrol ₹250 kharcha. Sahi hai?"}))
+        texts=[json.dumps({"language": "hi-Latn", "reply": "Swiggy se ₹1,400 income, petrol ₹250 kharcha. Sahi hai?"}),
+               json.dumps({"language": "hi-Latn", "reply": "Save ho gaya. Kharche ke baad ₹1,390 bache, target poora!",
+                           "used": ["today_after_costs"]})])
     assert check_llm.check(good) is True
-    assert "[ ok ] picked log_entries" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[ ok ] picked log_entries" in out and "[ ok ] chose an insight from the facts" in out
+    assert "facts used: ['today_after_costs']" in out
+
+    inventor = FakeProvider(turns=good.turns, texts=[good.texts[0], json.dumps(
+        {"language": "hi-Latn", "reply": "Save ho gaya. Aaj ₹1,800 bache!"})])
+    assert check_llm.check(inventor) is False
+    assert "the model's insight was not used" in capsys.readouterr().out
 
     wrong = FakeProvider(turns=[[("help", {})]], text="not json")
     wrong.last_response = {"choices": [{"message": {"content": "not json"}}]}

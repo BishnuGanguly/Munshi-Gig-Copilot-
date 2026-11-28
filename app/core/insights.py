@@ -106,3 +106,77 @@ def after_save(conn, user_id: str, today: date, entries: list[dict], income_befo
     day = date.fromisoformat(entries[0]["date"]) if len({e["date"] for e in entries}) == 1 else today
     profit = tools.get_summary(conn, user_id, day, day)["profit"]
     return f"{_profit_of(day, today)} {fmt_money(profit)}."
+
+
+# ------------------------------------------------------------------ facts for the model to choose from
+def _rupees(x: float):
+    """Whole rupees as an int when exact, so the model sees 1390 rather than 1390.0."""
+    x = round(float(x), 2)
+    return int(x) if x == int(x) else x
+
+
+def facts_after_save(conn, user_id: str, today: date, entries: list[dict], income_before: float) -> dict:
+    """Everything worth saying after a save, as named facts, each computed here. The model picks one or two and
+    words them; it may not use a number that is not in here. A fact that would mislead is left out rather than
+    flagged: there is no "below your usual day" (the day is not over) and no share of zero earnings."""
+    from .replies import describe_entry
+    today_iso = today.isoformat()
+    facts: dict = {"saved": "; ".join(describe_entry(e, today) for e in entries)}
+
+    if not any(e["date"] == today_iso for e in entries):
+        day = date.fromisoformat(entries[0]["date"]) if len({e["date"] for e in entries}) == 1 else None
+        if day:
+            s = tools.get_summary(conn, user_id, day, day)
+            facts["entries_were_for"] = ("yesterday" if day == today - timedelta(days=1)
+                                         else f"{day.day} {_MONTHS[day.month - 1]}")
+            facts.update({"that_day_income": _rupees(s["income"]), "that_day_costs": _rupees(s["expense"]),
+                          "that_day_after_costs": _rupees(s["profit"])})
+        return facts
+
+    s = tools.get_summary(conn, user_id, today, today)
+    facts["today_income"] = _rupees(s["income"])
+    if s["expense"] > 0:
+        facts["today_costs"] = _rupees(s["expense"])
+        if s["profit"] >= 0:
+            facts["today_after_costs"] = _rupees(s["profit"])
+        else:
+            facts["today_spent_more_than_earned_by"] = _rupees(-s["profit"])
+
+    target = tools.get_target(conn, user_id, today)
+    if target is not None:
+        facts["daily_target"] = _rupees(target)
+        if s["income"] >= target:
+            facts["target_reached_just_now" if income_before < target else "target_reached_earlier_today"] = True
+            if s["income"] > target:
+                facts["above_target_by"] = _rupees(s["income"] - target)
+            streak = tools.target_streak(conn, user_id, today)
+            if streak >= 2:
+                facts["target_met_days_in_a_row"] = streak
+        else:
+            facts["short_of_target_by"] = _rupees(target - s["income"])
+
+    average, worked = tools.recent_daily_income(conn, user_id, today)
+    if worked >= 3:
+        facts["usual_working_day_income"] = _rupees(round(average))
+        if s["income"] - average >= 1:
+            facts["today_above_usual_day_by"] = _rupees(round(s["income"] - average))
+
+    week = tools.get_summary(conn, user_id, dates.week_start(today), today)
+    if week["income"] > 0:
+        facts["this_week_income"] = _rupees(week["income"])
+        if week["expense_by_category"]:
+            cat, spent = next(iter(week["expense_by_category"].items()))
+            facts["biggest_cost_this_week"] = cat
+            facts["biggest_cost_this_week_amount"] = _rupees(spent)
+            share = round(100 * spent / week["income"])
+            if share >= 1:
+                facts["biggest_cost_share_of_week_income_percent"] = share
+            last_start = dates.week_start(today) - timedelta(days=7)
+            last = tools.get_summary(conn, user_id, last_start, last_start + timedelta(days=6))
+            if last["income"] > 0 and last["expense_by_category"].get(cat):
+                facts["same_cost_share_last_week_percent"] = round(100 * last["expense_by_category"][cat] / last["income"])
+        if len(week["income_by_platform"]) >= 2:
+            name, amount = next(iter(week["income_by_platform"].items()))
+            facts["best_platform_this_week"] = name
+            facts["best_platform_this_week_income"] = _rupees(amount)
+    return facts
