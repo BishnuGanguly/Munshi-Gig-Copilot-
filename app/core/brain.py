@@ -87,6 +87,8 @@ Rider: "kal Zomato se 1800 mile" / English: "Please confirm: income ₹1,800 fro
 {"language": "hi-Latn", "reply": "Zomato se ₹1,800 income. Sahi hai?"}
 Rider: "आज पेट्रोल में 320 लगे" / English: "Saved. Today's profit is ₹480."
 {"language": "hi-IN", "reply": "सेव हो गया। आज का मुनाफ़ा ₹480 है।"}
+Rider: "aaj 1500 mile" / English: "Saved. Today ₹1,500 in, ₹200 spent: ₹1,300 after costs."
+{"language": "hi-Latn", "reply": "Save ho gaya. Aaj ₹1,500 aaye, ₹200 kharcha. Asli kamai ₹1,300."}
 Rider: "Spent 90 on tea" / English: "Saved. Today's profit is ₹480."
 {"language": "en-IN", "reply": "Saved. Today's profit is ₹480."}
 

@@ -3,6 +3,10 @@
 A voice reply has room for one fact, so this picks exactly one line, by a fixed priority, and code computes
 every figure in it. The model never chooses or states an insight; it only rewords the sentence afterwards.
 
+Most riders hear "₹1,650 today" and take it as what they earned, though fuel and other costs often eat a
+large share (a Bengaluru diary study found running costs of ₹18,470 on ₹35,075 gross a month). So once today
+has any costs, a save of income opens with what is left after them - "asli kamai" - and then the target.
+
 Priority, for a save that includes today's income:
   1. the daily target was just reached (plus the streak, when there is one)
   2. the target was already reached: how far above it today is
@@ -30,8 +34,32 @@ def _profit_of(day: date, today: date) -> str:
     return f"Profit on {day.day} {_MONTHS[day.month - 1]} is"          # "20 Nov", easy to say aloud
 
 
+def _after_costs(income: float, spent: float) -> str:
+    net = income - spent
+    left = (f"{fmt_money(net)} after costs" if net >= 0
+            else f"{fmt_money(-net)} more spent than earned")
+    return f"Today {fmt_money(income)} in, {fmt_money(spent)} spent: {left}."
+
+
+def _with_costs(conn, user_id: str, today: date, income: float, spent: float, income_before: float) -> str:
+    """The real-earnings line, plus the target in as few amounts as possible (a reply is heard, not read)."""
+    text = _after_costs(income, spent)
+    target = tools.get_target(conn, user_id, today)
+    if target is None:
+        return text
+    if income >= target > income_before:
+        streak = tools.target_streak(conn, user_id, today)
+        return text + f" You reached your {fmt_money(target)} target!" + (f" {streak} days in a row." if streak >= 2 else "")
+    if income >= target:
+        return text + f" {fmt_money(income - target)} above your target."
+    return text + f" {fmt_money(target - income)} to your target."
+
+
 def _income_insight(conn, user_id: str, today: date, income_before: float) -> str | None:
-    income = tools.get_summary(conn, user_id, today, today)["income"]
+    s = tools.get_summary(conn, user_id, today, today)
+    income = s["income"]
+    if s["expense"] > 0:
+        return _with_costs(conn, user_id, today, income, s["expense"], income_before)
     target = tools.get_target(conn, user_id, today)
     if target is not None:
         if income >= target > income_before:

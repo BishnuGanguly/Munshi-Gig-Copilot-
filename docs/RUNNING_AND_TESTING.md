@@ -97,6 +97,8 @@ The container runs as a non-root user and has a healthcheck on `/health`
 4. Every "haan" that saves money is followed by one insight. To hear each kind: set a target
    (`target 1500 rakho`) and log income below it, then above it; log an expense (`petrol 260`) to hear its
    share of the week's earnings. "Better than your usual day" needs income on three earlier days.
+   Then log more income: because a cost exists today, the reply says what is left after costs
+   ("asli kamai" in Hinglish).
 5. A voice note is answered with a voice note; typed text is answered with text only.
 
 Rider identity on the page is a locally stored id. Different ids have separate books.
@@ -151,7 +153,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (609 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (628 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,

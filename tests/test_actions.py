@@ -54,7 +54,7 @@ def test_logging_proposes_then_commits(app):
     assert out.reply == "Please confirm: income ₹1,400 from Swiggy; expense ₹250 on fuel. Is that correct?"
     assert [e["status"] for e in out.entries] == ["pending_confirmation"] * 2
     assert saved(app) == []
-    assert app.confirm().reply == "Saved. Today's profit is ₹1,150."
+    assert app.confirm().reply == "Saved. Today ₹1,400 in, ₹250 spent: ₹1,150 after costs."
     assert [(r["type"], r["amount"]) for r in saved(app)] == [("income", 1400), ("expense", 250)]
 
 
