@@ -54,7 +54,7 @@ def parse_day(value, today: date) -> date | None:
 @dataclass
 class Query:
     """What `query_summary` was asked for."""
-    kind: str                 # earnings | spending | profit | best_platform | platform_breakdown | summary | savings | hours | goals
+    kind: str                 # earnings | spending | profit | platform_breakdown | summary | savings | hours
     period: str = "today"     # today | yesterday | this_week | last_week | this_month | last_month | all
     category: str | None = None
     platform: str | None = None

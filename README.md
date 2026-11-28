@@ -7,7 +7,7 @@ it back for confirmation, and answers questions about their own money. Riders ne
 detected per message and the reply comes back in the same one.
 
 **Status: a working prototype.** A backend plus a web page to talk to it, started with one Docker command.
-The WhatsApp channel comes later and plugs in on top of `POST /process`. 700 tests pass. See
+The WhatsApp channel comes later and plugs in on top of `POST /process`. 688 tests pass. See
 [What is and isn't verified](#what-is-and-isnt-verified) before trusting any provider-facing part.
 
 ```bash
@@ -62,7 +62,7 @@ appear as text, and as a voice note when you spoke. A banner at the top says whi
 ```bash
 uv sync                                          # creates .venv; ffmpeg comes bundled
 uv run uvicorn app.main:app --port 3000          # then open http://localhost:3000
-uv run pytest -q                                 # 700 passed
+uv run pytest -q                                 # 688 passed
 ```
 
 **What works with no keys.** Everything starts and the page works. Speech and voice fall back to **mocks**
@@ -96,13 +96,13 @@ munshi> Done. Your daily income target is ₹1,500.
 you>    Swiggy se 600 aaye aur petrol 250 ka dala
 munshi> Please confirm: income ₹600 from Swiggy; expense ₹250 on fuel. Is that correct?
 you>    haan
-munshi> Saved. Today's profit is ₹350. Target: ₹600 of ₹1,500, ₹900 to go.
+munshi> Saved. Today ₹600 in, ₹250 spent: ₹350 after costs. ₹900 to your target.
 you>    250 nahi 300 tha
 munshi> Change the last entry from expense ₹250 on fuel to expense ₹300 on fuel? Say yes to confirm.
 you>    haan
 munshi> Updated. The last entry is now expense ₹300 on fuel.
-you>    sabse achha platform kaunsa hai
-munshi> Your best platform this week is Swiggy with ₹600.
+you>    kaunsa din sabse accha jaata hai
+munshi> Not enough entries in the last 30 days to compare yet. Keep logging for a few more days.
 ```
 
 The two `haan` turns cost nothing: confirmations never reach the model.
@@ -118,8 +118,8 @@ in SQL or Python (`app/core/tools.py`), never produced by a model.
 | **Never guesses** | If income versus expense is unclear it asks ("Was ₹500 income or an expense?"), and a bare "haan" does not skip the question. Amounts outside ₹1–₹50,000 are refused. |
 | **Correct** | "it was 300 not 250", "should be 300", "actually it was diesel" — the last saved entry, confirmed first. Something new said before confirming is *added* to what is waiting; only a correction replaces it. |
 | **Delete** | "delete last entry", "undo" — confirmed first. |
-| **Ask** | Earnings (by platform or as incentives), spending (by category or platform), profit, best platform, savings — for today, yesterday, this/last week, this/last month, or overall. |
-| **An insight with every save** | After "haan", code computes a sheet of facts (earnings after costs, the target, the streak, today against a usual day, the biggest cost's share of the week, the best platform) and the model chooses the one or two that matter and says them in the rider's language, in the same call that would otherwise only translate. Every number it says must be one of those facts, or a fixed sentence is used instead. That fixed sentence is chosen by code. Once today has costs, saving income says what is left after them ("Today ₹1,650 in, ₹260 spent: ₹1,390 after costs"), because most riders take gross as net. Otherwise: target just reached (and the streak), how far above or short of the target, today against a usual working day (only when better — the day is not over), or an expense's share of the week's earnings. Otherwise the day's profit. |
+| **Ask** | Earnings (by platform or as incentives), spending (by category or platform), profit, savings — for today, yesterday, this/last week, this/last month, or overall. |
+| **An insight with every save** | After "haan", code computes facts (earnings after costs, the target, the streak, today against a usual day, the biggest cost's share of the week, the best platform) and the model picks the one or two that matter and says them in the rider's language, in the call that would otherwise only translate. Every number must be one of those facts. Without a model, or when its answer fails that check, a fixed sentence chosen by code is said instead (e.g. "Today ₹1,650 in, ₹260 spent: ₹1,390 after costs"). |
 | **Daily summary** | "aaj ka hisaab": income by platform, expenses by category, profit, the target, and today against the rider's recent daily average (working days only, once there are three). |
 | **Profit per platform** | Each app's income minus its own costs (penalties, commission); shared costs are shown separately, never split by guesswork. Over a week, also per working day, which is fairer than totals. |
 | **Patterns** | "kaunsa din sabse accha jaata hai", "kis app se zyada bachta hai", "paisa kahan jaata hai", "kaunsa hafta kharab tha": the model chooses what to compare (weekday, platform, cost, week or day; income, costs or after costs; a period, by default the last 30 days), code computes the table, and the model explains it using only those numbers. Weekdays are averaged per working day; today and unfinished weeks are not compared; a tie is said as a tie. |
@@ -152,44 +152,31 @@ Invariants enforced in code: arguments are schema-validated; **`user_id` is neve
 from the `Context`), so no caller can act for another rider; a write action only *proposes* (it stores a
 pending action and returns a read-back) and applies on `commit` after a yes.
 
-### Model providers
+### Model provider
 
 The model sits behind a two-method interface (`app/llm/base.py`): `choose_actions(system, tools, user)` and
-`complete(system, user)`. Nothing outside `app/llm/` knows a vendor's name or wire format, so providers are
-swappable, and chainable.
+`complete(system, user)`. Only `app/llm/` knows the vendor's wire format. The plan is Sarvam for everything
+(speech, voice, model), so `BRAIN` is `sarvam` or `none`; another provider would be one class implementing
+the interface. Overrides: `BRAIN_MODEL_SARVAM` (or `BRAIN_MODEL`), `BRAIN_BASE_URL_SARVAM`,
+`BRAIN_REASONING_SARVAM`.
 
-```
-BRAIN=sarvam                one provider
-BRAIN=sarvam,openai_compat  a chain: the next answers only when the one before it is down
-```
-
-| Name | Speaks | Notes |
-|---|---|---|
-| `sarvam` | OpenAI-style | India-hosted, billed in rupees; reuses `SARVAM_API_KEY`. Default model `sarvam-105b` |
-| `openai_compat` | OpenAI-style | any other server speaking that protocol (a local model included): `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH`, a model |
-
-The plan is Sarvam for everything (speech, voice, model). The generic `openai_compat` entry and the chain are
-kept because they are small; a provider with its own protocol is a class implementing the interface. Models and URLs are per-provider (`BRAIN_MODEL_<NAME>`,
-`BRAIN_BASE_URL_<NAME>`); `BRAIN_MODEL` is shorthand for the first provider's model.
-
-What the adapters absorb, so the rest of the code never sees it:
+What the adapter absorbs, so the rest of the code never sees it:
 
 - **Tool-call shape.** Our neutral `{name, description, input_schema}` becomes `{"type":"function",
-  "function":{..., "parameters"}}`, and the reply's `arguments` — often a JSON *string* — is parsed. Malformed arguments are "no call", never a crash.
-- **Schema dialect.** Our schemas allow `null` on optional fields; strict providers reject that, so
-  providers are sent a simplified schema. Validation still runs against the original.
-- **Reasoning leaks.** A `<think>…</think>` block in a reply is stripped; a reply cut off mid-thought is
-  treated as empty.
-- **Parallel tool calls** cannot be switched off on every model, so the app caps them itself.
+  "function":{..., "parameters"}}`, and the reply's `arguments` — often a JSON *string* — is parsed. Malformed
+  arguments are "no call", never a crash.
+- **Schema dialect.** Our schemas allow `null` on optional fields; strict providers reject that, so the model
+  is sent a simplified schema. Validation still runs against the original.
+- **Reasoning.** `sarvam-105b` thinks before answering, and the thinking uses up the token budget: choosing an
+  action gets `low`, rewording gets none. A `<think>…</think>` block in a reply is stripped; a reply cut off
+  mid-thought is treated as empty and explained in the error.
+- **Parallel tool calls** are not enforced off on every model, so the app caps them itself.
 - **Failure.** Every provider failure — network, auth, quota, malformed reply — becomes one
-  `LlmUnavailableError`. A chain moves on only for that. A model that simply chose no action is *not*
-  retried on the next vendor: that would double the cost and hide a quality problem. A bug is not an outage
-  and is never swallowed.
+  `LlmUnavailableError`, and the rider hears an honest "I could not understand". A bug is not an outage and is
+  never swallowed.
 
 A misspelt provider name stops the app at startup, not on the first rider's message.
-
-`tests/test_llm_failover.py` replays an outage end to end (first provider down, second answers; all down;
-the same guards whoever answered).
+`tests/test_llm_end_to_end.py` drives the adapter against a mocked server through to the database.
 
 ### What the model is and isn't trusted with
 
@@ -300,7 +287,6 @@ Also the Docker health check. `GET /docs` is the generated API reference.
 
 ```bash
 uv run python scripts/chat_cli.py --debug --fresh   # full conversation; --voice saves data/last_reply.wav
-uv run python scripts/process_cli.py note1.ogg      # one message through the pipeline, as JSON
 uv run python scripts/check_llm.py                  # smoke-test each model provider in BRAIN, live
 uv run python scripts/transcribe_cli.py note1.ogg   # audio → transcript, language, confidence
 uv run python scripts/speak_cli.py "Aaj ka profit 1150 rupaye hai" --lang hi-IN
@@ -362,7 +348,7 @@ All of it in `.env` (see `.env.example`). The defaults are mocks, so nothing cos
 |---|---|
 | **Speech-to-text** | `STT_PROVIDER` (`mock`/`sarvam`/`faster_whisper`), `STT_FALLBACK`, `STT_MIN_CONFIDENCE`, `SARVAM_API_KEY`, `SARVAM_MODEL`, `SARVAM_LANGUAGE_CODE`, `SARVAM_MODE`, `WHISPER_MODEL` |
 | **Voice replies** | `TTS_PROVIDER` (`mock`/`sarvam`), `SARVAM_TTS_MODEL`, `SARVAM_TTS_SPEAKER`, `VOICE_MAX_CHARS` |
-| **The model** | `BRAIN` (a provider, or a comma-separated chain), `BRAIN_MAX_ACTIONS`, `BRAIN_MODEL`, `BRAIN_MODEL_<NAME>`, `BRAIN_BASE_URL_<NAME>`, `BRAIN_REASONING_<NAME>`; for `openai_compat`: `BRAIN_BASE_URL`, `BRAIN_API_KEY_ENV`, `BRAIN_AUTH` |
+| **The model** | `BRAIN` (`sarvam` or `none`), `BRAIN_MAX_ACTIONS`, `BRAIN_MODEL_SARVAM` (or `BRAIN_MODEL`), `BRAIN_BASE_URL_SARVAM`, `BRAIN_REASONING_SARVAM` |
 | **Audio** | `MAX_AUDIO_SECONDS`, `SILENCE_RMS_THRESHOLD`, `FFMPEG_BIN` |
 | **App** | `DB_PATH`, `LOG_LEVEL` |
 
@@ -376,7 +362,7 @@ and locked in `uv.lock`.
 **Verified against a real service:** speech-to-text only. A real Hindi voice note returned
 `आज मैं दो सौ पचास रुपए का बचत किया।`, which normalises to `आज मैं 250 रुपए का बचत किया।`
 
-**Covered by the 700 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
+**Covered by the 688 tests:** audio handling, spoken amounts and normalisation across 8 languages, the
 action handlers and every confirmation flow, the registry and its guards, migrations, the daily target, the
 model-facing code against fake clients (including output that invents numbers or tries to act for another
 rider), the evaluation scorer, the web page and status endpoint (including that no key ever appears in
@@ -412,7 +398,7 @@ rewording a reply (`scripts/check_llm.py` passes).
 - **Real results.** The evaluation harness and 51 labelled transcripts exist; real rider recordings and a
   live-model run do not. This is the most important gap: the tests prove the code matches our own
   assumptions, not that it works for riders.
-- Savings goals, reminders, hours tracking (the bot says so when asked), a reporting dashboard, Postgres.
+- Savings goals, reminders, hours tracking (the bot says so when asked about hours), a reporting dashboard, Postgres.
 
 ## Layout
 
@@ -429,7 +415,7 @@ app/
   evaluation.py        scores the pipeline against labelled transcripts
   audio/               ffmpeg clean-up, validation, voice-note encoding
   stt/                 interface + sarvam, whisper_local, mock
-  llm/                 the provider interface; openai_compat (+ the sarvam preset), fallback chain
+  llm/                 the provider interface and the Sarvam adapter (OpenAI-style protocol)
   text/                numbers (spoken amounts → digits), normalize, chunk
   tts/                 service + sarvam, mock
   core/
@@ -441,8 +427,8 @@ app/
     db.py              schema + versioned migrations
     dates.py           IST and period resolution
     replies.py         reply wording and ₹ formatting
-scripts/               chat_cli, process_cli, transcribe_cli, speak_cli, check_llm, evaluate
-tests/                 700 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
+scripts/               chat_cli, transcribe_cli, speak_cli, check_llm, evaluate
+tests/                 688 tests; data/sentences.json (75 sample sentences), eval/cases.json (51 cases)
 Dockerfile             Python 3.11 + ffmpeg + locked dependencies; serves port 3000 as a non-root user
 docker-compose.yml     one command to start it; every variable has a default, no .env needed
 ```

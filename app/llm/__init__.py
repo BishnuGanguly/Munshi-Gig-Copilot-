@@ -1,97 +1,54 @@
-"""Model providers, chosen by configuration.
+"""The model provider, chosen by configuration.
 
-    BRAIN=sarvam                 Sarvam (the default plan)
+    BRAIN=sarvam                 Sarvam's chat model (sarvam-105b), billed in rupees, using SARVAM_API_KEY
     BRAIN=none                   off: the assistant says the model key is not set
 
-Two names: `sarvam`, and `openai_compat` for anything else that speaks the OpenAI-style Chat Completions
-protocol (set BRAIN_BASE_URL, BRAIN_API_KEY_ENV, BRAIN_AUTH and BRAIN_MODEL_OPENAI_COMPAT). A comma-separated
-list is a chain: the next provider answers only when the one before it is down.
-
-Per provider you can override: BRAIN_MODEL_<NAME>, BRAIN_BASE_URL_<NAME> and BRAIN_REASONING_<NAME>.
-`BRAIN_MODEL` is shorthand for the FIRST provider's model. A provider with its own protocol would be one new
-class implementing app/llm/base.py.
+Overrides: BRAIN_MODEL (or BRAIN_MODEL_SARVAM), BRAIN_BASE_URL_SARVAM, BRAIN_REASONING_SARVAM. Another provider
+would be one new class implementing app/llm/base.py.
 """
 import os
-from dataclasses import dataclass
 
 from .base import LlmProvider, ToolCall
-from .chain import FallbackLlm
 from .openai_compat import OpenAICompatProvider
 
-
-@dataclass(frozen=True)
-class Preset:
-    base_url: str
-    key_env: str          # the environment variable holding the key
-    auth: str             # bearer | header:<Name> | none
-    model: str            # default model
-    reasoning: tuple = () # (("choose", "low"), ("complete", "off")): reasoning_effort per kind of call
-
-
-# Confirmed live: POST /v1/chat/completions, the key in an `api-subscription-key` header, model `sarvam-105b`
-# (`sarvam-m` is deprecated).
-PRESETS: dict[str, Preset] = {
-    # sarvam-105b reasons by default and its reasoning tokens count against max_tokens. Choosing an action gets
-    # a little thinking; rewording a sentence gets none (null turns thinking off, per Sarvam's docs).
-    "sarvam": Preset("https://api.sarvam.ai/v1", "SARVAM_API_KEY", "header:api-subscription-key", "sarvam-105b",
-                     (("choose", "low"), ("complete", "off"))),
-}
-KNOWN = sorted({"openai_compat", *PRESETS})
+# Confirmed live: POST /v1/chat/completions, the key in an `api-subscription-key` header, model `sarvam-105b`.
+SARVAM_URL = "https://api.sarvam.ai/v1"
+SARVAM_MODEL = "sarvam-105b"
+# sarvam-105b reasons by default and its reasoning tokens count against max_tokens. Choosing an action gets a
+# little thinking; rewording a sentence gets none (null turns thinking off, per Sarvam's docs).
+SARVAM_REASONING = {"choose": "low", "complete": "off"}
+KNOWN = ["sarvam"]
 
 
-def _model_for(name: str, default: str, primary: bool) -> str:
-    return (os.getenv(f"BRAIN_MODEL_{name.upper()}")
-            or (os.getenv("BRAIN_MODEL") if primary else None)
-            or default)
-
-
-def build_provider(name: str, primary: bool = True) -> LlmProvider:
-    """One provider by name. Cheap: nothing is contacted and no key is needed until it is used."""
+def build_provider(name: str = "sarvam") -> LlmProvider:
+    """The provider by name. Cheap: nothing is contacted and no key is needed until it is used."""
     name = name.strip().lower()
-    if name == "openai_compat":
-        base = os.getenv("BRAIN_BASE_URL")
-        if not base:
-            raise ValueError("BRAIN=openai_compat needs BRAIN_BASE_URL (and usually BRAIN_API_KEY_ENV, BRAIN_AUTH)")
-        key_env = os.getenv("BRAIN_API_KEY_ENV", "")
-        model = _model_for(name, "", primary)
-        if not model:
-            raise ValueError("BRAIN=openai_compat needs BRAIN_MODEL_OPENAI_COMPAT (or BRAIN_MODEL if it is first)")
-        return OpenAICompatProvider(name, base, model, os.getenv(key_env) if key_env else None,
-                                    os.getenv("BRAIN_AUTH", "bearer"))
-    if name in PRESETS:
-        p = PRESETS[name]
-        reasoning = dict(p.reasoning)
-        override = os.getenv(f"BRAIN_REASONING_{name.upper()}")      # low | medium | high | off | omit, both calls
-        if override:
-            reasoning = {"choose": override, "complete": override}
-        return OpenAICompatProvider(name, os.getenv(f"BRAIN_BASE_URL_{name.upper()}") or p.base_url,
-                                    _model_for(name, p.model, primary), os.getenv(p.key_env), p.auth,
-                                    reasoning=reasoning)
-    raise ValueError(f"Unknown BRAIN provider {name!r}. Choose from: none, {', '.join(KNOWN)}")
+    if name != "sarvam":
+        raise ValueError(f"Unknown BRAIN provider {name!r}. Choose from: none, {', '.join(KNOWN)}")
+    override = os.getenv("BRAIN_REASONING_SARVAM")          # low | medium | high | off | omit, both calls
+    reasoning = {"choose": override, "complete": override} if override else dict(SARVAM_REASONING)
+    model = os.getenv("BRAIN_MODEL_SARVAM") or os.getenv("BRAIN_MODEL") or SARVAM_MODEL
+    return OpenAICompatProvider("sarvam", os.getenv("BRAIN_BASE_URL_SARVAM") or SARVAM_URL, model,
+                                os.getenv("SARVAM_API_KEY"), "header:api-subscription-key", reasoning=reasoning)
 
 
 def _config_key() -> tuple:
-    names = ("BRAIN", "BRAIN_MODEL", "BRAIN_BASE_URL", "BRAIN_API_KEY_ENV", "BRAIN_AUTH")
-    extra = tuple(sorted((k, v) for k, v in os.environ.items()
-                         if k.startswith(("BRAIN_MODEL_", "BRAIN_BASE_URL_", "BRAIN_REASONING_")) or k.endswith("_API_KEY")))
-    return tuple(os.getenv(n) for n in names) + extra
+    names = ("BRAIN", "BRAIN_MODEL", "BRAIN_MODEL_SARVAM", "BRAIN_BASE_URL_SARVAM", "BRAIN_REASONING_SARVAM",
+             "SARVAM_API_KEY")
+    return tuple(os.getenv(n) for n in names)
 
 
 _cache: dict[tuple, LlmProvider | None] = {}
 
 
 def get_provider() -> LlmProvider | None:
-    """The configured provider (or chain), or None when BRAIN=none. Cached while the configuration is
-    unchanged, so connections are reused across messages."""
+    """The configured provider, or None when BRAIN=none. Cached while the configuration is unchanged, so
+    connections are reused across messages."""
     key = _config_key()
     if key not in _cache:
-        spec = [s for s in os.getenv("BRAIN", "none").replace(" ", "").lower().split(",") if s]
-        if not spec or spec == ["none"]:
-            _cache[key] = None
-        else:
-            providers = [build_provider(n, primary=(i == 0)) for i, n in enumerate(spec)]
-            _cache[key] = providers[0] if len(providers) == 1 else FallbackLlm(providers)
+        name = os.getenv("BRAIN", "none").strip().lower()
+        _cache[key] = None if name in ("", "none") else build_provider(name)
     return _cache[key]
 
 
-__all__ = ["get_provider", "build_provider", "LlmProvider", "ToolCall", "FallbackLlm", "PRESETS", "KNOWN"]
+__all__ = ["get_provider", "build_provider", "LlmProvider", "ToolCall", "KNOWN"]

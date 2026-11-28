@@ -68,14 +68,6 @@ def test_status_when_configured_and_never_leaks_a_key(monkeypatch):
     assert secret not in r.text and "sk_" not in r.text
 
 
-def test_a_keyless_local_server_is_ready(monkeypatch):
-    monkeypatch.setenv("BRAIN", "openai_compat")
-    monkeypatch.setenv("BRAIN_BASE_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("BRAIN_AUTH", "none")
-    monkeypatch.setenv("BRAIN_MODEL_OPENAI_COMPAT", "llama3.1")
-    assert client().get("/status").json()["model"]["ready"] is True
-
-
 def test_the_api_still_works_beside_the_page():
     c = client()
     assert c.get("/health").json() == {"status": "ok"}
