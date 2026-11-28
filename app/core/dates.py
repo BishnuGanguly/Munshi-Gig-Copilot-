@@ -31,6 +31,8 @@ def resolve_period(key: str, today: date) -> tuple[str, date | None, date | None
     if key == "last_month":
         end = month_start(today) - timedelta(days=1)
         return "last month", month_start(end), end
+    if key == "last_30_days":
+        return "in the last 30 days", today - timedelta(days=29), today
     if key == "all":
         return "overall", None, None
     return "today", today, today

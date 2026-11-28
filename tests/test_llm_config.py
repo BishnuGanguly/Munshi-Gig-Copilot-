@@ -198,19 +198,27 @@ def test_check_llm_passes_a_well_behaved_provider_and_fails_a_poor_one(monkeypat
     spec.loader.exec_module(check_llm)
 
     good = FakeProvider(turns=[[("log_entries", {"entries": [
-        {"type": "income", "amount": 1400, "platform": "Swiggy"}, {"type": "expense", "amount": 250, "category": "fuel"}]})]],
+        {"type": "income", "amount": 1400, "platform": "Swiggy"}, {"type": "expense", "amount": 250, "category": "fuel"}]})],
+        [("analyze", {"group_by": "weekday"})]],
         texts=[json.dumps({"language": "hi-Latn", "reply": "Swiggy se ₹1,400 income, petrol ₹250 kharcha. Sahi hai?"}),
                json.dumps({"language": "hi-Latn", "reply": "Save ho gaya. Kharche ke baad ₹1,390 bache, target poora!",
-                           "used": ["today_after_costs"]})])
+                           "used": ["today_after_costs"]}),
+               json.dumps({"language": "hi-Latn", "reply": "Shaniwar sabse accha, average ₹1,900. Somvar sabse kam, ₹800.",
+                           "used": ["highest", "highest_value", "lowest", "lowest_value"]})])
     assert check_llm.check(good) is True
     out = capsys.readouterr().out
     assert "[ ok ] picked log_entries" in out and "[ ok ] chose an insight from the facts" in out
     assert "facts used: ['today_after_costs']" in out
+    assert "[ ok ] picked analyze by weekday" in out and "[ ok ] explained the analysis" in out
 
     inventor = FakeProvider(turns=good.turns, texts=[good.texts[0], json.dumps(
         {"language": "hi-Latn", "reply": "Save ho gaya. Aaj ₹1,800 bache!"})])
     assert check_llm.check(inventor) is False
     assert "the model's insight was not used" in capsys.readouterr().out
+
+    no_analyze = FakeProvider(turns=[good.turns[0], [("query_summary", {"kind": "earnings"})]], texts=good.texts)
+    assert check_llm.check(no_analyze) is False
+    assert "[FAIL] expected analyze with group_by weekday" in capsys.readouterr().out
 
     wrong = FakeProvider(turns=[[("help", {})]], text="not json")
     wrong.last_response = {"choices": [{"message": {"content": "not json"}}]}

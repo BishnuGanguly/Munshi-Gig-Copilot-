@@ -94,6 +94,9 @@ The container runs as a non-root user and has a healthcheck on `/health`
    For the reports: `aaj ka hisaab` (the daily summary), `swiggy se profit kitna hua` (one app's own profit),
    `is hafte kaunsa app zyada deta hai` (profit per app, per working day).
    Log a platform cost to see it counted against that app: `swiggy ka 50 penalty laga`.
+   Patterns, once a few days are logged: `kaunsa din sabse accha jaata hai`, `kis app se kharche ke baad
+   zyada bachta hai`, `paisa kahan jaata hai`, `kaunsa hafta sabse kharab tha`. With too little data the
+   reply says so ("Not enough entries ... to compare yet").
 4. Every "haan" that saves money is followed by one insight. To hear each kind: set a target
    (`target 1500 rakho`) and log income below it, then above it; log an expense (`petrol 260`) to hear its
    share of the week's earnings. "Better than your usual day" needs income on three earlier days.
@@ -137,7 +140,7 @@ All run from the repository root with `uv run python scripts/<name>.py`.
 
 | Script | What it does |
 |---|---|
-| `check_llm.py` | Three real model calls per provider in `BRAIN`: picks the right action, rewords a reply without changing a number, and after a save chooses an insight from computed facts without inventing a number. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
+| `check_llm.py` | Five real model calls per provider in `BRAIN`: picks the right action, rewords a reply without changing a number, after a save chooses an insight from computed facts without inventing a number, picks `analyze` for "kaunsa din sabse accha jaata hai", and explains that analysis using only computed numbers. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
 | `transcribe_cli.py note1.ogg` | Speech-to-text only; prints the transcript and language. |
 | `speak_cli.py "text" --lang hi-IN -o reply` | Text-to-speech; writes `reply.ogg` and `reply.wav`. |
 | `process_cli.py note1.ogg` or `process_cli.py "text"` | The whole pipeline once; prints the JSON. In-memory database. |
@@ -156,7 +159,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (662 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (700 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,

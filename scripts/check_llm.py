@@ -1,6 +1,7 @@
-"""Smoke-test each configured model provider with three real calls: does it pick the right action with
-the right arguments, can it reword a reply without changing a number, and after a save does it choose an
-insight from our computed facts without inventing a number?
+"""Smoke-test each configured model provider with five real calls: does it pick the right action with
+the right arguments, can it reword a reply without changing a number, after a save does it choose an
+insight from our computed facts without inventing a number, does it pick `analyze` for a question about a
+pattern, and does it explain that analysis using only computed numbers?
 
     uv run python scripts/check_llm.py                    # every provider named in BRAIN
     uv run python scripts/check_llm.py --provider sarvam  # just one
@@ -93,6 +94,43 @@ def check(provider) -> bool:
         print(f"  [warn] expected Hinglish for a Hinglish message, got {language!r}")
     else:
         print("  [ ok ] chose an insight from the facts, every number is one of them")
+
+    # A question about a pattern: the model should choose `analyze`, then explain the computed table.
+    question = "kaunsa din sabse accha jaata hai"
+    t = time.perf_counter()
+    try:
+        calls = provider.choose_actions(brain.SYSTEM_UNDERSTAND % 3, REGISTRY.tool_definitions(),
+                                        f"Today is 2026-11-28.\n\nThe rider says: {question}")
+    except LlmUnavailableError as exc:
+        print(f"  [FAIL] choose_actions for a pattern question: {exc}")
+        return False
+    ms = int((time.perf_counter() - t) * 1000)
+    print(f"  pattern question -> {[(c.name, c.args) for c in calls]}  ({ms} ms)")
+    if calls and calls[0].name == "analyze" and calls[0].args.get("group_by") == "weekday":
+        print("  [ ok ] picked analyze by weekday")
+    else:
+        print("  [FAIL] expected analyze with group_by weekday")
+        ok = False
+
+    facts = {"period": "in the last 30 days", "grouped_by": "weekday",
+             "measure": "income per working day, on average",
+             "rows": [{"name": "Saturday", "value": 1900, "days": 4}, {"name": "Wednesday", "value": 1200, "days": 4},
+                      {"name": "Monday", "value": 800, "days": 4}],
+             "highest": "Saturday", "highest_value": 1900, "lowest": "Monday", "lowest_value": 800,
+             "highest_minus_lowest": 1100}
+    fixed = ("In the last 30 days, by weekday: highest Saturday, ₹1,900 earned a working day on average. "
+             "Lowest Monday, ₹800.")
+    renderer = brain.Renderer(provider)
+    t = time.perf_counter()
+    reply, language, warnings = renderer.render_insight(fixed, facts, question, brain.SYSTEM_EXPLAIN)
+    ms = int((time.perf_counter() - t) * 1000)
+    print(f"  explain -> [{language}] {reply}  ({ms} ms)  facts used: {renderer.last_used}")
+    if warnings:
+        print(f"  [FAIL] the model's explanation was not used: {warnings}")
+        print(f"         model said: {renderer.last_raw[:600]!r}")
+        ok = False
+    else:
+        print("  [ ok ] explained the analysis, every number is one of the computed facts")
     return ok
 
 
