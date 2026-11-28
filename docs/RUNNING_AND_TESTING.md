@@ -140,10 +140,9 @@ All run from the repository root with `uv run python scripts/<name>.py`.
 
 | Script | What it does |
 |---|---|
-| `check_llm.py` | Five real model calls per provider in `BRAIN`: picks the right action, rewords a reply without changing a number, after a save chooses an insight from computed facts without inventing a number, picks `analyze` for "kaunsa din sabse accha jaata hai", and explains that analysis using only computed numbers. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
+| `check_llm.py` | Five real model calls: picks the right action, rewords a reply without changing a number, after a save chooses an insight from computed facts without inventing a number, picks `analyze` for "kaunsa din sabse accha jaata hai", and explains that analysis using only computed numbers. **Run this first after setting a key.** `--provider sarvam` for one. Exits non-zero on failure. |
 | `transcribe_cli.py note1.ogg` | Speech-to-text only; prints the transcript and language. |
 | `speak_cli.py "text" --lang hi-IN -o reply` | Text-to-speech; writes `reply.ogg` and `reply.wav`. |
-| `process_cli.py note1.ogg` or `process_cli.py "text"` | The whole pipeline once; prints the JSON. In-memory database. |
 | `chat_cli.py` | Multi-turn terminal chat so confirmations work. `--debug` shows normalised text; `--fresh` empties the database; `--voice` also writes `data/last_reply.wav`. A path to an audio file sends a voice note. `/quit` leaves. |
 | `evaluate.py` | Scores the pipeline on 51 labelled transcripts (section 9). |
 
@@ -159,7 +158,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (700 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (688 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,

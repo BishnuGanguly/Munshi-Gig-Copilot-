@@ -10,7 +10,7 @@ import pytest
 
 from app.core import dates, db, tools, validate
 from app.core.actions import REGISTRY
-from app.core.registry import Context
+from app.core.registry import ActionError, Context
 
 NOW = datetime(2026, 11, 25, 10, 0, tzinfo=dates.IST)   # a Wednesday
 
@@ -147,8 +147,8 @@ def test_queries(app):
     assert q(kind="spending", period="this_week") == "This week you spent ₹2,100. Biggest: fuel ₹1,200."
     assert q(kind="spending", period="this_week", category="fuel") == "This week you spent ₹1,200 on fuel."
     assert q(kind="profit", period="this_week") == "This week: income ₹8,400, expenses ₹2,100, profit ₹6,300."
-    assert q(kind="best_platform", period="this_week") == \
-        "Your best platform this week is Swiggy with ₹5,000. Next: Zomato ₹3,400."
+    assert app("analyze", {"group_by": "platform", "period": "this_week"}).reply == \
+        "This week, by platform: highest Swiggy, ₹5,000 earned. Lowest Zomato, ₹3,400."
     assert q(kind="earnings", period="today") == "No income recorded today."
     assert q(kind="earnings", period="yesterday").startswith("Yesterday you earned ₹8,400")
     assert q(kind="earnings", period="all").startswith("Overall you earned ₹8,400")
@@ -159,11 +159,13 @@ def test_savings_and_honest_gaps(app):
     app.confirm()
     assert app("query_summary", {"kind": "savings", "period": "today"}).reply == "Today you saved ₹250."
     assert "do not track working hours" in app("query_summary", {"kind": "hours"}).reply
-    assert "coming soon" in app("query_summary", {"kind": "goals"}).reply
+    for gone in ("goals", "best_platform"):         # removed: best platform is `analyze` now
+        with pytest.raises(ActionError):
+            app("query_summary", {"kind": gone})
 
 
 def test_empty_periods_say_so(app):
-    for kind in ("earnings", "spending", "savings", "best_platform", "profit", "summary"):
+    for kind in ("earnings", "spending", "savings", "profit", "summary"):
         assert "No " in app("query_summary", {"kind": kind, "period": "this_month"}).reply
 
 

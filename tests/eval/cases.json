@@ -163,10 +163,10 @@
    "noise": "clean",
    "text": "Which platform is best for me",
    "expect": {
-    "intent": "query",
+    "intent": "analyze",
     "entries": [],
     "args": {
-     "kind": "best_platform",
+     "group_by": "platform",
      "period": "this_week"
     }
    }
@@ -402,10 +402,10 @@
    "noise": "clean",
    "text": "sabse achha platform kaun sa hai",
    "expect": {
-    "intent": "query",
+    "intent": "analyze",
     "entries": [],
     "args": {
-     "kind": "best_platform",
+     "group_by": "platform",
      "period": "this_week"
     }
    }
@@ -629,10 +629,10 @@
    "noise": "clean",
    "text": "सबसे अच्छा प्लेटफ़ॉर्म कौन सा है",
    "expect": {
-    "intent": "query",
+    "intent": "analyze",
     "entries": [],
     "args": {
-     "kind": "best_platform",
+     "group_by": "platform",
      "period": "this_week"
     }
    }
@@ -799,10 +799,10 @@
    "noise": "clean",
    "text": "எந்த ஆப் சிறந்தது",
    "expect": {
-    "intent": "query",
+    "intent": "analyze",
     "entries": [],
     "args": {
-     "kind": "best_platform",
+     "group_by": "platform",
      "period": "this_week"
     }
    }

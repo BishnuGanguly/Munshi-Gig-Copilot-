@@ -128,9 +128,13 @@ class OracleProvider:
             return [ToolCall("log_entries", {"entries": entries})]
         if expect["intent"] == "query":
             return [ToolCall("query_summary", dict(expect["args"]))]
+        if expect["intent"] == "analyze":
+            return [ToolCall("analyze", dict(expect["args"]))]
         return [ToolCall("help", {})]
 
     def complete(self, system, user, max_tokens=512):
+        if "The assistant's English reply:" not in user:
+            return ""         # an insight or explanation from facts: decline, so our fixed sentence is used
         english = user.split("The assistant's English reply:", 1)[-1].strip()
         return json.dumps({"language": "en-IN", "reply": english})
 

@@ -3,8 +3,8 @@ the right arguments, can it reword a reply without changing a number, after a sa
 insight from our computed facts without inventing a number, does it pick `analyze` for a question about a
 pattern, and does it explain that analysis using only computed numbers?
 
-    uv run python scripts/check_llm.py                    # every provider named in BRAIN
-    uv run python scripts/check_llm.py --provider sarvam  # just one
+    uv run python scripts/check_llm.py                    # the provider named in BRAIN
+    uv run python scripts/check_llm.py --provider sarvam  # even when BRAIN is not set
 
 This is the first thing to run once you have a key. It exists because the provider code is tested against
 mocked servers only: the endpoint, the auth header and the shape of a tool call were taken from docs seen
@@ -139,12 +139,11 @@ def main() -> int:
     ap.add_argument("--provider", help=f"one of: {', '.join(KNOWN)} (default: whatever BRAIN names)")
     args = ap.parse_args()
     get_settings()
-    names = [args.provider] if args.provider else [
-        n for n in os.getenv("BRAIN", "none").replace(" ", "").lower().split(",") if n and n != "none"]
-    if not names:
-        print("BRAIN is not set. Set e.g. BRAIN=sarvam in .env, or pass --provider sarvam.")
+    name = args.provider or os.getenv("BRAIN", "none").strip().lower()
+    if name in ("", "none"):
+        print("BRAIN is not set. Set BRAIN=sarvam in .env, or pass --provider sarvam.")
         return 2
-    results = {n: check(build_provider(n, primary=(i == 0))) for i, n in enumerate(names)}
+    results = {name: check(build_provider(name))}
     print("\n" + "\n".join(f"{'PASS' if v else 'FAIL'}  {k}" for k, v in results.items()))
     return 0 if all(results.values()) else 1
 

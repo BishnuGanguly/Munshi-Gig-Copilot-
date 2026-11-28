@@ -3,7 +3,7 @@ never a key, a URL with credentials, or any part of a secret."""
 import importlib.util
 import os
 
-from app.llm import FallbackLlm, get_provider
+from app.llm import get_provider
 from app.llm.openai_compat import OpenAICompatProvider
 
 
@@ -18,13 +18,10 @@ def model_status() -> dict:
     if provider is None:
         return {"provider": "none", "ready": False,
                 "message": "Model not configured (BRAIN=none): messages cannot be understood."}
-    chain = provider.providers if isinstance(provider, FallbackLlm) else [provider]
-    ready = [p.name for p in chain if _provider_ready(p)]
-    names = [p.name for p in chain]
-    if ready:
-        return {"provider": ",".join(names), "ready": True, "message": f"Model: {', '.join(ready)}."}
-    return {"provider": ",".join(names), "ready": False,
-            "message": f"Model key not set for {', '.join(names)}: messages cannot be understood."}
+    if _provider_ready(provider):
+        return {"provider": provider.name, "ready": True, "message": f"Model: {provider.name}."}
+    return {"provider": provider.name, "ready": False,
+            "message": f"Model key not set for {provider.name}: messages cannot be understood."}
 
 
 def _service(kind: str, env: str) -> dict:

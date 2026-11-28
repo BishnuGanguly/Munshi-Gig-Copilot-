@@ -233,8 +233,6 @@ def platform_report(ctx: Context, label: str, start, end, period: str) -> str:
 def answer_query(ctx: Context, q: validate.Query) -> str:
     if q.kind == "hours":
         return "I do not track working hours yet."
-    if q.kind == "goals":
-        return "Savings goals are coming soon."
     label, start, end = dates.resolve_period(q.period, ctx.today)
     if q.kind == "platform_breakdown":
         return platform_report(ctx, label, start, end, q.period)
@@ -265,14 +263,6 @@ def answer_query(ctx: Context, q: validate.Query) -> str:
         return text + "."
     if q.kind == "savings":
         return f"No savings recorded {label}." if s["saving"] == 0 else _phrase(label, f"you saved {fmt_money(s['saving'])}.")
-    if q.kind == "best_platform":
-        by = list(s["income_by_platform"].items())
-        if not by:
-            return f"No income with a platform recorded {label}."
-        text = f"Your best platform {label} is {by[0][0]} with {fmt_money(by[0][1])}."
-        if len(by) > 1:
-            text += f" Next: {by[1][0]} {fmt_money(by[1][1])}."
-        return text
     if s["count"] == 0:                                              # profit / summary over a longer period
         return f"No entries recorded {label}."
     head = f"{label[0].upper()}{label[1:]}"
@@ -377,8 +367,7 @@ _ENTRY = {
     "required": ["amount"],
     "additionalProperties": False,
 }
-_QUERY_KINDS = ["earnings", "spending", "profit", "best_platform", "platform_breakdown", "summary", "savings",
-                "hours", "goals"]
+_QUERY_KINDS = ["earnings", "spending", "profit", "platform_breakdown", "summary", "savings", "hours"]
 _PERIODS = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_30_days", "all"]
 
 
@@ -404,7 +393,7 @@ def build_registry() -> Registry:
         "delete_entry", "Delete the most recent saved entry. Needs confirmation.",
         {"type": "object", "properties": {}, "additionalProperties": False}, _delete_run, read_only=False, commit=_delete_commit))
     r.register(ActionSpec(
-        "query_summary", "Answer a question about the user's own money for a period. kind=summary is the full report (use it for "
+        "query_summary", "Answer a question about the user's own money for a period (which app or day is BEST is `analyze`). kind=summary is the full report (use it for "
         "'aaj ka hisaab', 'how was my day'); platform_breakdown compares profit per app; profit or summary with a "
         "platform is that one app's own profit.",
         {"type": "object", "properties": {
