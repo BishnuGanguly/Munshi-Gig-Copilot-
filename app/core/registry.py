@@ -40,6 +40,7 @@ class Outcome:
     intent: str = "unknown"
     warnings: list = field(default_factory=list)
     actions: list = field(default_factory=list)   # audit trail: [{"name": ..., "args": ...}]
+    facts: dict | None = None    # after a save: computed facts the model may choose an insight from
 
 
 @dataclass

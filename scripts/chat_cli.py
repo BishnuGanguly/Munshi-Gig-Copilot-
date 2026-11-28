@@ -31,7 +31,7 @@ def main() -> int:
     conn = db.connect(str(path))
     from app.core.brain import enabled
     if not enabled():
-        print("NOTE: BRAIN is not set to anthropic, so nothing can be understood. See .env.example.")
+        print("NOTE: BRAIN is not set, so nothing can be understood. See .env.example.")
     print("Munshi chat. Try: Got 1400 from Swiggy and spent 250 on petrol   (/quit to leave)")
     while True:
         try:

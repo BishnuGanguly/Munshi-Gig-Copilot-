@@ -54,7 +54,7 @@ def test_logging_proposes_then_commits(app):
     assert out.reply == "Please confirm: income ₹1,400 from Swiggy; expense ₹250 on fuel. Is that correct?"
     assert [e["status"] for e in out.entries] == ["pending_confirmation"] * 2
     assert saved(app) == []
-    assert app.confirm().reply == "Saved. Today's profit is ₹1,150."
+    assert app.confirm().reply == "Saved. Today ₹1,400 in, ₹250 spent: ₹1,150 after costs."
     assert [(r["type"], r["amount"]) for r in saved(app)] == [("income", 1400), ("expense", 250)]
 
 
@@ -181,9 +181,9 @@ def test_target_progress_and_streak(app):
     app("set_target", {"amount": 1500}); app.confirm()
     assert app("get_target_progress").reply == "Today ₹0 of ₹1,500. ₹1,500 to go."
     log(app, type="income", amount=600, platform="Swiggy")
-    assert app.confirm().reply == "Saved. Today's profit is ₹600. Target: ₹600 of ₹1,500, ₹900 to go."
+    assert app.confirm().reply == "Saved. Today ₹600 so far. ₹900 more to reach your ₹1,500 target."
     log(app, type="income", amount=900, platform="Zomato")
-    assert app.confirm().reply.endswith("You reached your daily target of ₹1,500!")
+    assert app.confirm().reply == "Saved. You reached your daily target of ₹1,500!"
     assert app("get_target_progress").reply == "Today ₹1,500 of ₹1,500. Target reached!"
     for d in (1, 2):
         app.clock["now"] = NOW + timedelta(days=d)

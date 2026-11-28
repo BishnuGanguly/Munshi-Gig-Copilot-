@@ -6,12 +6,15 @@ answered locally so it costs nothing and cannot be got wrong.
 """
 import re
 from dataclasses import dataclass
+from datetime import date
 
 # Amounts a rider can log, and the daily income target they can set.
 MIN_AMOUNT, MAX_AMOUNT = 1, 50_000
 TARGET_MIN, TARGET_MAX = 100, 50_000
 
-EXPENSE_CATEGORIES = ["fuel", "repair", "recharge", "emi", "rent", "food", "penalty"]
+EXPENSE_CATEGORIES = ["fuel", "repair", "recharge", "emi", "rent", "food", "penalty", "commission"]
+# Costs that belong to one platform (a fine, the platform's cut or subscription). Others, like fuel, are shared.
+PLATFORM_COST_CATEGORIES = ["penalty", "commission"]
 INCOME_CATEGORIES = ["earnings", "incentive"]
 CATEGORIES = EXPENSE_CATEGORIES + ["other"]
 ALL_CATEGORIES = CATEGORIES + INCOME_CATEGORIES + ["savings"]
@@ -20,18 +23,48 @@ PLATFORMS = ["Swiggy", "Zomato", "Uber", "Ola", "Rapido", "Blinkit", "Zepto", "P
              "Flipkart", "BigBasket", "inDrive"]
 
 
+# How far back an entry may be dated. Further back is far more likely a misheard date than a real one.
+MAX_BACKDATE_DAYS = 90
+
+
+def fit_category(type_: str | None, category: str | None) -> str:
+    """A category that is valid for the entry's type: income can only be earnings or incentive, an expense
+    only an expense category, a saving only savings. Anything else falls back to the type's default, so a
+    mismatch (an expense filed as "earnings", or an income left as "fuel" after a correction) cannot be stored."""
+    if type_ == "income":
+        return category if category in INCOME_CATEGORIES else "earnings"
+    if type_ == "saving":
+        return "savings"
+    return category if category in CATEGORIES else "other"
+
+
+def parse_day(value, today: date) -> date | None:
+    """The entry's date if it is a real ISO date, not in the future and not implausibly old; else None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        d = date.fromisoformat(value)
+    except ValueError:
+        return None
+    if d > today or (today - d).days > MAX_BACKDATE_DAYS:
+        return None
+    return d
+
+
 @dataclass
 class Query:
     """What `query_summary` was asked for."""
-    kind: str                 # earnings | spending | profit | best_platform | summary | savings | hours | goals
+    kind: str                 # earnings | spending | profit | best_platform | platform_breakdown | summary | savings | hours | goals
     period: str = "today"     # today | yesterday | this_week | last_week | this_month | last_month | all
     category: str | None = None
     platform: str | None = None
 
 
-def validate_entry(e: dict) -> list[str]:
+def validate_entry(e: dict, today: date | None = None) -> list[str]:
     """Problems with one entry, whoever produced it. An empty list means it is safe to store."""
     problems = []
+    if today is not None and parse_day(e.get("date"), today) is None:
+        problems.append("bad_date")
     if e.get("amount") is None or not (MIN_AMOUNT <= e["amount"] <= MAX_AMOUNT):
         problems.append("amount_out_of_range")
     if e.get("type") not in ("income", "expense", "saving"):

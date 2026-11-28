@@ -103,8 +103,10 @@ def test_no_translation_call_is_made(chat):
 def test_a_correction_while_pending_replaces_it(chat):
     r1, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
     chat("250 ka petrol", understander=r1)
-    r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}]})])
+    r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}],
+                                             "replace_waiting": True})])
     out = chat("250 nahi 300 tha", understander=r2)
+    assert "₹250" not in out.outcome.reply
     assert "₹300" in out.outcome.reply
     assert "An action is already waiting" in api2.chooses[0]["user"]   # the model is told
     chat("haan")
@@ -135,7 +137,7 @@ def test_render_asks_for_a_rewording_and_nothing_else():
     rend.render("Saved. Today's profit is ₹350.", "250 ka petrol")
     req = provider.requests[0]
     assert req["kind"] == "complete" and "tools" not in req          # rewording is not a tool call
-    assert req["system"] == brain.SYSTEM_RENDER and "SAME" in req["system"]
+    assert req["system"] == brain.SYSTEM_RENDER and "language and script the rider used" in req["system"]
     assert "250 ka petrol" in req["user"] and "Saved. Today's profit is ₹350." in req["user"]
 
 
@@ -398,3 +400,20 @@ def test_an_invented_number_is_named_in_the_diagnostics():
     r = Renderer(FakeProvider(text='{"language": "hi-IN", "reply": "munafa ₹9,999"}'))
     assert r.render("Today's profit is ₹350.", "x")[2][0].startswith("reply_numbers_invented")
     assert "9999" in r.last_problem
+
+
+def test_the_rewording_prompt_shows_hinglish_and_does_not_let_the_examples_leak_numbers():
+    """Found live: without examples the model labelled our English sentence hi-Latn and changed nothing."""
+    sysmsg = brain.SYSTEM_RENDER
+    assert "Hinglish means Hindi words written in Roman letters" in sysmsg and "Do NOT leave it in English" in sysmsg
+    for example_number in ("1,800", "480", "320"):
+        assert example_number in sysmsg                                    # the examples carry numbers...
+    assert "never from the examples" in sysmsg                             # ...and the model is told not to use them
+    # the example numbers must differ from the ones the smoke test sends, or a copied example would pass the guard
+    assert not any(n in sysmsg for n in ("1,400", "₹250", "₹350"))
+
+
+def test_a_model_that_copies_an_example_number_is_caught_by_the_guard():
+    r = Renderer(FakeProvider(text=rendering("hi-Latn", "Save ho gaya. Aaj ka munafa ₹480 hai.")))
+    reply, lang, warnings = r.render("Saved. Today's profit is ₹1,150.", "kitna hua")
+    assert reply == "Saved. Today's profit is ₹1,150." and warnings[0].startswith("reply_numbers_invented")

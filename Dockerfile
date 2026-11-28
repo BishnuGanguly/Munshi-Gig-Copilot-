@@ -19,8 +19,8 @@ RUN pip install --no-cache-dir uv==0.11.32
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-# Locked dependencies, without dev tools; the `llm` extra adds the Anthropic SDK (only used if configured).
-RUN uv sync --frozen --no-dev --extra llm --no-install-project
+# Locked dependencies, without dev tools.
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY scripts ./scripts

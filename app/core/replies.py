@@ -29,6 +29,7 @@ def describe_entry(e: dict, today: date) -> str:
     else:
         cat = e.get("category")
         text = f"expense {amount}" + (f" on {cat}" if cat and cat != "other" else "")
+        text += f" for {e['platform']}" if e.get("platform") else ""
     d = date.fromisoformat(e["date"])
     if d != today:
         text += " (yesterday)" if (today - d).days == 1 else f" ({d.isoformat()})"
@@ -48,4 +49,6 @@ NOT_UNDERSTOOD = ("Sorry, I could not understand. Try: Got 1400 from Swiggy, or 
                   "or ask: How much did I earn this week?")
 NOTHING_PENDING = "There is nothing waiting for confirmation."
 NO_ENTRIES = "You have no saved entries yet."
+BAD_DATE = ("I could not use that date. An entry can be dated today or up to 90 days back, not in the future. "
+            "Please say it again.")
 BAD_AMOUNT = "I could not use that amount. Amounts must be between ₹1 and ₹50,000. Please say it again."

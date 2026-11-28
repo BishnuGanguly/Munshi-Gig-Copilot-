@@ -4,16 +4,12 @@ import importlib.util
 import os
 
 from app.llm import FallbackLlm, get_provider
-from app.llm.anthropic_provider import AnthropicProvider
 from app.llm.openai_compat import OpenAICompatProvider
 
 
 def _provider_ready(p) -> bool:
     if isinstance(p, OpenAICompatProvider):
         return p.auth == "none" or bool(p.api_key)
-    if isinstance(p, AnthropicProvider):
-        # A key, or a token. An `ant auth login` profile also works but cannot be seen from here.
-        return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
     return False
 
 

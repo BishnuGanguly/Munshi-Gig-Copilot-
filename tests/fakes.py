@@ -10,8 +10,10 @@ class FakeProvider:
     `text` is what `complete` returns. Everything asked of it is recorded in `requests`."""
     name = "fake"
 
-    def __init__(self, turns=(), text="", raises=None):
+    def __init__(self, turns=(), text="", raises=None, texts=None):
+        """`texts`, when given, is what successive `complete` calls return (the last one repeats)."""
         self.turns, self.text, self.raises = [list(t) for t in turns], text, raises
+        self.texts = list(texts) if texts else None
         self.requests = []
 
     def choose_actions(self, system, tools, user, max_tokens=1024):
@@ -26,6 +28,9 @@ class FakeProvider:
         self.requests.append({"kind": "complete", "system": system, "user": user})
         if self.raises:
             raise self.raises
+        if self.texts:
+            n = len(self.completes)
+            return self.texts[min(n - 1, len(self.texts) - 1)]
         return self.text
 
     @property

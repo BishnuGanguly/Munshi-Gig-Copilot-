@@ -1,4 +1,4 @@
-"""The OpenAI-style adapter (Sarvam, OpenAI, Groq, OpenRouter, Ollama ...), against a mocked HTTP server."""
+"""The OpenAI-style adapter (Sarvam and any other OpenAI-style server), against a mocked HTTP server."""
 import json
 
 import httpx
@@ -306,3 +306,10 @@ def test_usage_is_recorded_for_diagnosis():
     p = provider(lambda r: httpx.Response(200, json=body))
     p.complete("s", "u")
     assert p.last_finish == "stop" and p.last_usage == {"completion_tokens": 40, "reasoning_tokens": 12}
+
+
+def test_the_whole_reply_is_kept_so_a_failure_can_be_read():
+    body = {"choices": [{"message": {"content": "", "reasoning_content": "hmm"}, "finish_reason": "stop"}], "id": "x1"}
+    p = provider(lambda r: httpx.Response(200, json=body))
+    p.complete("s", "u")
+    assert p.last_response == body

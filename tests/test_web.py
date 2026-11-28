@@ -60,17 +60,19 @@ def test_status_names_a_provider_whose_key_is_missing(monkeypatch):
 
 def test_status_when_configured_and_never_leaks_a_key(monkeypatch):
     secret = "sk_live_DO_NOT_LEAK_1234567890"
-    for k, v in {"BRAIN": "sarvam,anthropic", "SARVAM_API_KEY": secret, "ANTHROPIC_API_KEY": secret + "x",
-                 "STT_PROVIDER": "sarvam", "TTS_PROVIDER": "sarvam"}.items():
+    for k, v in {"BRAIN": "sarvam", "SARVAM_API_KEY": secret, "STT_PROVIDER": "sarvam", "TTS_PROVIDER": "sarvam"}.items():
         monkeypatch.setenv(k, v)
     r = client().get("/status")
-    assert r.json()["model"] == {"provider": "sarvam,anthropic", "ready": True, "message": "Model: sarvam, anthropic."}
+    assert r.json()["model"] == {"provider": "sarvam", "ready": True, "message": "Model: sarvam."}
     assert r.json()["speech_to_text"]["ready"] and r.json()["voice"]["ready"]
     assert secret not in r.text and "sk_" not in r.text
 
 
-def test_ollama_needs_no_key_to_be_ready(monkeypatch):
-    monkeypatch.setenv("BRAIN", "ollama")
+def test_a_keyless_local_server_is_ready(monkeypatch):
+    monkeypatch.setenv("BRAIN", "openai_compat")
+    monkeypatch.setenv("BRAIN_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("BRAIN_AUTH", "none")
+    monkeypatch.setenv("BRAIN_MODEL_OPENAI_COMPAT", "llama3.1")
     assert client().get("/status").json()["model"]["ready"] is True
 
 
@@ -118,5 +120,41 @@ def test_the_image_pins_its_tools():
 
 def test_every_documented_variable_is_passed_through():
     env = compose()["services"]["munshi"]["environment"]
-    for name in ("BRAIN", "SARVAM_API_KEY", "ANTHROPIC_API_KEY", "STT_PROVIDER", "TTS_PROVIDER"):
+    for name in ("BRAIN", "SARVAM_API_KEY", "STT_PROVIDER", "TTS_PROVIDER"):
         assert name in env
+
+
+def test_a_file_database_gets_a_connection_per_request(tmp_path):
+    path = str(tmp_path / "m.db")
+    c = TestClient(create_app(path))
+    assert c.post("/process", data={"user_id": "a", "text": "haan"}).status_code == 200
+    from app.core import db
+    seen = db.connect(path).execute("SELECT transcript FROM messages").fetchall()
+    assert [r[0] for r in seen] == ["haan"]
+
+
+def test_a_slow_request_does_not_hold_up_another(tmp_path, monkeypatch):
+    """The pipeline blocks on network calls; it must run in the thread pool, not on the event loop."""
+    import asyncio
+    import time
+
+    import httpx
+
+    from app import pipeline
+
+    def slow(conn, user_id, **kw):
+        time.sleep(0.5)
+        return pipeline.ProcessResult("t", "en-IN", "t")
+
+    monkeypatch.setattr(pipeline, "process", slow)
+    app = create_app(str(tmp_path / "m.db"))
+
+    async def both():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            start = time.perf_counter()
+            rs = await asyncio.gather(*(c.post("/process", data={"user_id": u, "text": "x"}) for u in ("a", "b")))
+            return time.perf_counter() - start, rs
+
+    took, rs = asyncio.run(both())
+    assert all(r.status_code == 200 for r in rs)
+    assert took < 0.9, f"two 0.5 s requests took {took:.2f} s: they ran one after the other"

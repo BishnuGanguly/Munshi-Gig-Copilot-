@@ -98,7 +98,7 @@ def test_voice_note_to_confirmed_entry(client, with_model):
 
     n = len(api.chooses)
     r2 = client.post("/process", data={"user_id": "e2e", "text": "haan"}).json()
-    assert r2["reply_english"] == "Saved. Today's profit is ₹1,150."
+    assert r2["reply_english"] == "Saved. Today ₹1,400 in, ₹250 spent: ₹1,150 after costs."
     assert len(api.chooses) == n                                             # confirmations stay local
 
     r3 = client.post("/process", data={"user_id": "e2e", "text": "aaj kitna kamaya"}).json()

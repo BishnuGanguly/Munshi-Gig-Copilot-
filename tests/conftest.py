@@ -8,7 +8,6 @@ def _isolated_env(monkeypatch):
     monkeypatch.setenv("STT_FALLBACK", "none")
     monkeypatch.setenv("TTS_PROVIDER", "mock")
     monkeypatch.setenv("BRAIN", "none")
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("BRAIN_MODEL", raising=False)
     monkeypatch.delenv("BRAIN_RENDER_MODEL", raising=False)
     monkeypatch.delenv("SARVAM_TTS_MODEL", raising=False)

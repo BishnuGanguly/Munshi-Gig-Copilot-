@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from fastapi import FastAPI
 
@@ -16,7 +17,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
     # Nothing is contacted and no key is needed: building a provider is cheap.
     provider = get_provider()
     logging.getLogger("munshi").info("model provider: %s", provider.name if provider else "none (BRAIN=none)")
-    app.state.db = db.connect(db_path or settings.db_path)
+    # Migrate once at startup. Requests then open their own connection (see app/api/routes.py), so a slow
+    # speech or model call for one rider never holds up another.
+    app.state.db_path = db_path or settings.db_path
+    app.state.db = db.connect(app.state.db_path)
+    app.state.db_lock = threading.Lock()
     app.include_router(router)
     return app
 

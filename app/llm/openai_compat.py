@@ -1,8 +1,7 @@
 """Any provider that speaks the OpenAI-style Chat Completions protocol.
 
-That is a long list - Sarvam, OpenAI, Groq, OpenRouter, Together, Ollama, vLLM, LM Studio - so one adapter
-with a base URL, an auth style and a model covers them all. Only the first of those has been checked against
-its docs (and only through search snippets); the rest rely on the protocol being standard.
+Sarvam speaks it, and so do many others (OpenAI, Groq, Ollama, vLLM ...), so one adapter with a base URL, an
+auth style and a model covers them. Only Sarvam is the planned target.
 
 Wire shape handled here:
   request   {"model", "messages": [system, user], "max_tokens", "tools": [{"type":"function","function":{...}}],
@@ -88,6 +87,7 @@ class OpenAICompatProvider:
         self._reasoning_rejected = False
         self.last_finish: str | None = None
         self.last_usage: dict = {}
+        self.last_response: dict = {}          # the provider's whole reply, kept so a failure can be read, not guessed
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.model, self.api_key, self.auth, self.retries = model, api_key or "", auth, retries
         self.client = httpx.Client(timeout=timeout, transport=transport)
@@ -144,6 +144,7 @@ class OpenAICompatProvider:
             message = choice["message"] or {}
         except (KeyError, IndexError, TypeError):
             raise LlmUnavailableError(f"unexpected response shape: {str(data)[:200]}")
+        self.last_response = data
         self.last_finish = choice.get("finish_reason")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         self.last_usage = usage
