@@ -122,3 +122,39 @@ def test_every_documented_variable_is_passed_through():
     env = compose()["services"]["munshi"]["environment"]
     for name in ("BRAIN", "SARVAM_API_KEY", "STT_PROVIDER", "TTS_PROVIDER"):
         assert name in env
+
+
+def test_a_file_database_gets_a_connection_per_request(tmp_path):
+    path = str(tmp_path / "m.db")
+    c = TestClient(create_app(path))
+    assert c.post("/process", data={"user_id": "a", "text": "haan"}).status_code == 200
+    from app.core import db
+    seen = db.connect(path).execute("SELECT transcript FROM messages").fetchall()
+    assert [r[0] for r in seen] == ["haan"]
+
+
+def test_a_slow_request_does_not_hold_up_another(tmp_path, monkeypatch):
+    """The pipeline blocks on network calls; it must run in the thread pool, not on the event loop."""
+    import asyncio
+    import time
+
+    import httpx
+
+    from app import pipeline
+
+    def slow(conn, user_id, **kw):
+        time.sleep(0.5)
+        return pipeline.ProcessResult("t", "en-IN", "t")
+
+    monkeypatch.setattr(pipeline, "process", slow)
+    app = create_app(str(tmp_path / "m.db"))
+
+    async def both():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            start = time.perf_counter()
+            rs = await asyncio.gather(*(c.post("/process", data={"user_id": u, "text": "x"}) for u in ("a", "b")))
+            return time.perf_counter() - start, rs
+
+    took, rs = asyncio.run(both())
+    assert all(r.status_code == 200 for r in rs)
+    assert took < 0.9, f"two 0.5 s requests took {took:.2f} s: they ran one after the other"

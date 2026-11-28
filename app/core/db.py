@@ -37,13 +37,18 @@ CREATE TABLE IF NOT EXISTS pending (
 """
 
 
-def connect(db_path: str) -> sqlite3.Connection:
+def connect(db_path: str, migrate: bool = True) -> sqlite3.Connection:
+    """Open the database. `migrate=False` is for the per-request connections the web app opens once the
+    schema is known to be current (see app/main.py)."""
     if db_path != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    _migrate(conn)
+    if db_path != ":memory:":
+        conn.execute("PRAGMA journal_mode=WAL")     # readers do not wait for a writer
+    if migrate:
+        conn.executescript(SCHEMA)
+        _migrate(conn)
     return conn
 
 
@@ -101,9 +106,14 @@ def _m4_rename_english_text(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE messages ADD COLUMN normalized_text TEXT")
 
 
+def _m5_transaction_index(conn: sqlite3.Connection) -> None:
+    """Every summary filters one rider's entries by date."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user_day ON transactions (user_id, occurred_on)")
+
+
 # Append new migrations here with the next number. Never edit or reorder old ones.
 MIGRATIONS = [(1, _m1_allow_saving), (2, _m2_targets), (3, _m3_message_audit),
-              (4, _m4_rename_english_text)]
+              (4, _m4_rename_english_text), (5, _m5_transaction_index)]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

@@ -1,9 +1,11 @@
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse
 
 from app import pipeline
+from app.core import db
 from app.status import status as service_status
 from app.audio import to_voice_note
 from app.tts import get_tts
@@ -31,18 +33,37 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@contextmanager
+def request_db(app):
+    """A connection for one request. A file database gets a fresh connection per request (SQLite in WAL mode
+    lets them run side by side); an in-memory one exists only on its single connection, so requests take
+    turns on it - that is only ever the test suite."""
+    if app.state.db_path == ":memory:":
+        with app.state.db_lock:
+            yield app.state.db
+        return
+    conn = db.connect(app.state.db_path, migrate=False)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+# A plain `def`, not `async def`: the pipeline makes blocking network calls (speech, model, voice), and FastAPI
+# runs a plain function in its thread pool. Inside an `async def` those calls would stall every other request.
 @router.post("/process")
-async def process(
+def process(
     request: Request,
     user_id: str = Form(...),
     text: str | None = Form(None),
     audio: UploadFile | None = File(None),
     voice: str = Form("auto"),
 ) -> dict:
-    raw = await audio.read() if audio is not None else None
+    raw = audio.file.read() if audio is not None else None
     try:
-        result = pipeline.process(request.app.state.db, user_id, audio=raw,
-                                  filename=audio.filename if audio else None, text=text, voice=voice)
+        with request_db(request.app) as conn:
+            result = pipeline.process(conn, user_id, audio=raw,
+                                      filename=audio.filename if audio else None, text=text, voice=voice)
     except ValueError as exc:  # AudioError / UnclearAudioError are ValueErrors
         raise HTTPException(status_code=400, detail=str(exc))
     except ServiceUnavailableError as exc:

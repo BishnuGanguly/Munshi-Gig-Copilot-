@@ -1,7 +1,9 @@
 """Tool layer: every number the user sees is computed here, in code, never by a model."""
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+
+from .validate import PLATFORM_COST_CATEGORIES
 
 
 # ------------------------------------------------------------------ transactions
@@ -58,19 +60,83 @@ def get_summary(conn: sqlite3.Connection, user_id: str, start: date | None, end:
     totals = {"income": 0.0, "expense": 0.0, "saving": 0.0}
     by_platform: dict[str, float] = {}
     by_category: dict[str, float] = {}
+    expense_by_platform: dict[str, float] = {}
     for r in rows:
         totals[r["type"]] += r["amount"]
         if r["type"] == "income" and r["platform"]:
             by_platform[r["platform"]] = by_platform.get(r["platform"], 0.0) + r["amount"]
         if r["type"] == "expense":
             by_category[r["category"] or "other"] = by_category.get(r["category"] or "other", 0.0) + r["amount"]
+            if r["platform"]:
+                expense_by_platform[r["platform"]] = expense_by_platform.get(r["platform"], 0.0) + r["amount"]
     return {
         **{k: round(v, 2) for k, v in totals.items()},
         "profit": round(totals["income"] - totals["expense"], 2),
         "count": len(rows),
         "income_by_platform": dict(sorted(((k, round(v, 2)) for k, v in by_platform.items()), key=lambda kv: -kv[1])),
         "expense_by_category": dict(sorted(((k, round(v, 2)) for k, v in by_category.items()), key=lambda kv: -kv[1])),
+        "expense_by_platform": _desc(expense_by_platform),
     }
+
+
+def _desc(d: dict) -> dict:
+    return dict(sorted(((k, round(v, 2)) for k, v in d.items()), key=lambda kv: (-kv[1], kv[0])))
+
+
+def platform_breakdown(conn: sqlite3.Connection, user_id: str, start: date | None, end: date | None) -> dict:
+    """Profit per platform, honestly: a platform's income minus the costs that belong to that platform alone
+    (a penalty or commission logged against it). Shared costs - fuel, repairs, recharge, anything logged
+    without a platform - are reported separately and never split between platforms by guesswork.
+
+    Returns {"platforms": {name: {"income", "costs", "costs_by_category", "net", "days"}}, ordered by net,
+             "shared": {"total", "by_category"}}. `days` is how many days that platform had income."""
+    where, args = ["user_id = ?"], [user_id]
+    if start:
+        where.append("occurred_on >= ?")
+        args.append(start.isoformat())
+    if end:
+        where.append("occurred_on <= ?")
+        args.append(end.isoformat())
+    rows = conn.execute(
+        f"SELECT type, amount, category, platform, occurred_on FROM transactions WHERE {' AND '.join(where)}",
+        args).fetchall()
+    plats: dict[str, dict] = {}
+    shared: dict[str, float] = {}
+    days: dict[str, set] = {}
+
+    def plat(name):
+        return plats.setdefault(name, {"income": 0.0, "costs": 0.0, "costs_by_category": {}})
+
+    for r in rows:
+        if r["type"] == "income" and r["platform"]:
+            plat(r["platform"])["income"] += r["amount"]
+            days.setdefault(r["platform"], set()).add(r["occurred_on"])
+        elif r["type"] == "expense":
+            cat = r["category"] or "other"
+            if r["platform"] and cat in PLATFORM_COST_CATEGORIES:
+                p = plat(r["platform"])
+                p["costs"] += r["amount"]
+                p["costs_by_category"][cat] = p["costs_by_category"].get(cat, 0.0) + r["amount"]
+            else:
+                shared[cat] = shared.get(cat, 0.0) + r["amount"]
+    out = {}
+    for name, p in plats.items():
+        out[name] = {"income": round(p["income"], 2), "costs": round(p["costs"], 2),
+                     "costs_by_category": _desc(p["costs_by_category"]),
+                     "net": round(p["income"] - p["costs"], 2), "days": len(days.get(name, ()))}
+    ordered = dict(sorted(out.items(), key=lambda kv: (-kv[1]["net"], kv[0])))
+    return {"platforms": ordered, "shared": {"total": round(sum(shared.values()), 2), "by_category": _desc(shared)}}
+
+
+def recent_daily_income(conn: sqlite3.Connection, user_id: str, before: date, days: int = 7) -> tuple[float, int]:
+    """Average income per WORKING day over the `days` days before `before` (days with no income are rest
+    days and are left out, so a day off does not drag the average down). Returns (average, working_days)."""
+    rows = conn.execute(
+        "SELECT occurred_on, SUM(amount) AS total FROM transactions WHERE user_id = ? AND type = 'income' "
+        "AND occurred_on >= ? AND occurred_on < ? GROUP BY occurred_on",
+        (user_id, (before - timedelta(days=days)).isoformat(), before.isoformat())).fetchall()
+    totals = [r["total"] for r in rows if r["total"] > 0]
+    return (round(sum(totals) / len(totals), 2) if totals else 0.0), len(totals)
 
 
 # ------------------------------------------------------------------ daily income target
@@ -101,7 +167,6 @@ def target_progress(conn: sqlite3.Connection, user_id: str, day: date) -> dict |
 
 def target_streak(conn: sqlite3.Connection, user_id: str, today: date, max_days: int = 60) -> int:
     """Consecutive days on which the target was met, counting back from today (or yesterday if today isn't met yet)."""
-    from datetime import timedelta
     p = target_progress(conn, user_id, today)
     day = today if (p and p["met"]) else today - timedelta(days=1)
     streak = 0

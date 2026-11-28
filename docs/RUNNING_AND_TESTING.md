@@ -91,6 +91,9 @@ The container runs as a non-root user and has a healthcheck on `/health`
 2. Munshi reads the entry back and asks you to confirm. Reply `haan` / `yes` to save, `nahi` / `no` to
    discard. The Haan/Nahi buttons do the same.
 3. Ask questions: `aaj kitna kamaya`, `is hafte ka kharcha`, `target 1000 set karo`, `target kitna bacha`.
+   For the reports: `aaj ka hisaab` (the daily summary), `swiggy se profit kitna hua` (one app's own profit),
+   `is hafte kaunsa app zyada deta hai` (profit per app, per working day).
+   Log a platform cost to see it counted against that app: `swiggy ka 50 penalty laga`.
 4. A voice note is answered with a voice note; typed text is answered with text only.
 
 Rider identity on the page is a locally stored id. Different ids have separate books.
@@ -145,7 +148,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (544 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (586 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,
@@ -178,7 +181,9 @@ words ("two fifty") are not converted (`en-13`).
 2. `uv run python scripts/check_llm.py` prints PASS for `sarvam` (needs the key).
 3. `uv run python scripts/transcribe_cli.py note1.ogg` prints a sensible transcript (needs a recording).
 4. `uv run python scripts/chat_cli.py --debug`: send `aaj swiggy se 1400 aaye`, then `haan`, then
-   `aaj kitna kamaya`. Expect a confirmation, "Saved", then a total of ₹1,400.
+   `aaj kitna kamaya`. Expect a confirmation, "Saved", then a total of ₹1,400. Then `swiggy ka 50 penalty
+   laga`, `haan`, `petrol 250`, `haan`, and `aaj ka hisaab`: expect income ₹1,400, expenses ₹300 (fuel ₹250,
+   penalty ₹50), profit ₹1,100.
 5. `uv run uvicorn app.main:app --port 3000`, open the page, repeat step 4 by typing and by voice.
 6. `docker compose up --build`, open <http://localhost:3000>, confirm `docker compose ps` shows `healthy`.
 7. Delete `.env`, run `docker compose up --build` again, and confirm the page loads with the key banner (the

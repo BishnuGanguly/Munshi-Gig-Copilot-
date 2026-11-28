@@ -103,8 +103,10 @@ def test_no_translation_call_is_made(chat):
 def test_a_correction_while_pending_replaces_it(chat):
     r1, _ = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 250, "category": "fuel"}]})])
     chat("250 ka petrol", understander=r1)
-    r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}]})])
+    r2, api2 = router_for([("log_entries", {"entries": [{"type": "expense", "amount": 300, "category": "fuel"}],
+                                             "replace_waiting": True})])
     out = chat("250 nahi 300 tha", understander=r2)
+    assert "₹250" not in out.outcome.reply
     assert "₹300" in out.outcome.reply
     assert "An action is already waiting" in api2.chooses[0]["user"]   # the model is told
     chat("haan")
