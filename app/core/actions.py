@@ -3,7 +3,7 @@
 Every number shown to the user is computed here with tools.* (SQL/code), never by a model."""
 from datetime import date
 
-from . import dates, replies, tools, validate
+from . import dates, insights, replies, tools, validate
 from .registry import ActionSpec, Context, Outcome, Registry
 from .replies import fmt_money
 
@@ -94,16 +94,7 @@ def _log_commit(ctx: Context, pending: dict) -> Outcome:
     before = tools.get_summary(ctx.conn, ctx.user_id, today, today)["income"]
     for e in pending["entries"]:
         tools.add_transaction(ctx.conn, ctx.user_id, e["type"], e["amount"], e["category"], e["platform"], e["date"])
-    s = tools.get_summary(ctx.conn, ctx.user_id, today, today)
-    reply = f"Saved. Today's profit is {fmt_money(s['profit'])}."
-    target = tools.get_target(ctx.conn, ctx.user_id, today)
-    if target is not None and any(e["type"] == "income" and e["date"] == today.isoformat() for e in pending["entries"]):
-        if s["income"] >= target and before < target:
-            reply += f" You reached your daily target of {fmt_money(target)}!"
-        elif s["income"] >= target:
-            reply += f" Target of {fmt_money(target)} is already reached today."
-        else:
-            reply += f" Target: {fmt_money(s['income'])} of {fmt_money(target)}, {fmt_money(target - s['income'])} to go."
+    reply = "Saved. " + insights.after_save(ctx.conn, ctx.user_id, today, pending["entries"], before)
     return Outcome(reply, [entry_out(e, "saved") for e in pending["entries"]], "confirm")
 
 

@@ -181,9 +181,9 @@ def test_target_progress_and_streak(app):
     app("set_target", {"amount": 1500}); app.confirm()
     assert app("get_target_progress").reply == "Today ₹0 of ₹1,500. ₹1,500 to go."
     log(app, type="income", amount=600, platform="Swiggy")
-    assert app.confirm().reply == "Saved. Today's profit is ₹600. Target: ₹600 of ₹1,500, ₹900 to go."
+    assert app.confirm().reply == "Saved. Today ₹600 so far. ₹900 more to reach your ₹1,500 target."
     log(app, type="income", amount=900, platform="Zomato")
-    assert app.confirm().reply.endswith("You reached your daily target of ₹1,500!")
+    assert app.confirm().reply == "Saved. You reached your daily target of ₹1,500!"
     assert app("get_target_progress").reply == "Today ₹1,500 of ₹1,500. Target reached!"
     for d in (1, 2):
         app.clock["now"] = NOW + timedelta(days=d)

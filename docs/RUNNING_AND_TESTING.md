@@ -94,6 +94,9 @@ The container runs as a non-root user and has a healthcheck on `/health`
    For the reports: `aaj ka hisaab` (the daily summary), `swiggy se profit kitna hua` (one app's own profit),
    `is hafte kaunsa app zyada deta hai` (profit per app, per working day).
    Log a platform cost to see it counted against that app: `swiggy ka 50 penalty laga`.
+5. Every "haan" that saves money is followed by one insight. To hear each kind: set a target
+   (`target 1500 rakho`) and log income below it, then above it; log an expense (`petrol 260`) to hear its
+   share of the week's earnings. "Better than your usual day" needs income on three earlier days.
 4. A voice note is answered with a voice note; typed text is answered with text only.
 
 Rider identity on the page is a locally stored id. Different ids have separate books.
@@ -148,7 +151,7 @@ uv run pytest -k "confirm" -q           # by name
 uv run pytest -x -q                     # stop at the first failure
 ```
 
-The suite (586 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
+The suite (609 tests at the time of writing) is isolated from your `.env`: `tests/conftest.py` forces mock
 speech and voice and `BRAIN=none`, so it never calls a real service and never spends money. It covers audio
 handling, spoken-amount and script normalisation, every action and confirmation flow, the model guards
 (invented numbers, unknown actions, another rider's id), provider configuration and failover, migrations,
