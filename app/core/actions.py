@@ -3,7 +3,7 @@
 Every number shown to the user is computed here with tools.* (SQL/code), never by a model."""
 from datetime import date
 
-from . import dates, insights, replies, tools, validate
+from . import analysis, dates, insights, replies, tools, validate
 from .registry import ActionSpec, Context, Outcome, Registry
 from .replies import fmt_money
 
@@ -287,6 +287,22 @@ def _query_run(ctx: Context, args: dict) -> Outcome:
     return Outcome(answer_query(ctx, q), intent="query")
 
 
+# ------------------------------------------------------------------ analyze
+# A month of data is what a weekday pattern needs; "this week" would rarely have each day twice.
+ANALYZE_DEFAULT_PERIOD = "last_30_days"
+
+
+def _analyze_run(ctx: Context, args: dict) -> Outcome:
+    group_by = args["group_by"]
+    measure = args.get("measure") or ("costs" if group_by == "category" else "income")
+    label, start, end = dates.resolve_period(args.get("period") or ANALYZE_DEFAULT_PERIOD, ctx.today)
+    result = analysis.analyze(ctx.conn, ctx.user_id, group_by, measure, start, end, today=ctx.today)
+    reply = analysis.summary_sentence(result, group_by, label)
+    if len(result["rows"]) < analysis.MIN_GROUPS:
+        return Outcome(reply, intent="analyze")          # nothing to explain: say so plainly
+    return Outcome(reply, intent="analyze", facts=analysis.facts(result, group_by, label), facts_for="analysis")
+
+
 # ------------------------------------------------------------------ set_target / get_target_progress
 def _target_range_msg() -> str:
     return f"A daily target must be between {fmt_money(validate.TARGET_MIN)} and {fmt_money(validate.TARGET_MAX)}."
@@ -363,7 +379,7 @@ _ENTRY = {
 }
 _QUERY_KINDS = ["earnings", "spending", "profit", "best_platform", "platform_breakdown", "summary", "savings",
                 "hours", "goals"]
-_PERIODS = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "all"]
+_PERIODS = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_30_days", "all"]
 
 
 def build_registry() -> Registry:
@@ -396,6 +412,18 @@ def build_registry() -> Registry:
             "category": {"type": ["string", "null"], "enum": CATEGORIES + [None]},
             "platform": {"type": ["string", "null"], "enum": PLATFORMS + [None]}},
          "required": ["kind"], "additionalProperties": False}, _query_run))
+    r.register(ActionSpec(
+        "analyze", "Find a pattern in the user's own money: which weekday, platform, cost or week is highest or "
+        "lowest. Use for questions like 'which day is best for me', 'which app pays most after costs', 'where does "
+        "my money go', 'which week was worst'. Not for a plain total (that is query_summary).",
+        {"type": "object", "properties": {
+            "group_by": {"type": "string", "enum": analysis.GROUPS,
+                         "description": "weekday: which day of the week; platform: which app; category: which "
+                                        "kind of cost; week or day: which week or date"},
+            "measure": {"type": "string", "enum": analysis.MEASURES,
+                        "description": "what to compare; leave out for income (costs for category)"},
+            "period": {"type": "string", "enum": _PERIODS, "description": "leave out for the last 30 days"}},
+         "required": ["group_by"], "additionalProperties": False}, _analyze_run))
     r.register(ActionSpec(
         "set_target", "Set or change the user's daily INCOME target in rupees (100 to 50000; out-of-range values get a friendly refusal). Needs confirmation.",
         {"type": "object", "properties": {"amount": {"type": "number"}},

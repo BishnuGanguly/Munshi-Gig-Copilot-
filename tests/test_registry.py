@@ -36,7 +36,7 @@ def test_validate_args(args, ok):
 def test_tool_definitions_are_valid_llm_tools():
     defs = REGISTRY.tool_definitions()
     assert {d["name"] for d in defs} == {"log_entries", "correct_entry", "delete_entry", "query_summary", "set_target",
-                                         "get_target_progress", "help"}
+                                         "get_target_progress", "help", "analyze"}
     for d in defs:
         assert d["description"] and d["input_schema"]["type"] == "object"
         json.dumps(d)                                  # must be serialisable to send to a model
